@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EDU Flygledning</title>
+<meta name="description" content="Flygledning för Minecraft-servern EDU: begär tillstånd att landa och lyfta, och styr trafiken som ATC.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Condensed:wght@500;700;900&family=Sofia+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --apron:#cfd2cb;
+  --apron-2:#bfc3bb;
+  --ink:#1d2229;
+  --ink-2:#4b535e;
+  --paper:#f7f5ee;
+  --paper-2:#ecE9df;
+  --yellow:#f0b90b;
+  --green:#1f9d6b;
+  --red:#d6403a;
+  --blue:#2f6db5;
+  --grey:#8a9099;
+  --display:"Sofia Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Sofia Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--apron);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45}
+button,input,select{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.05;letter-spacing:.005em}
+h2{font-size:1.65rem;font-weight:900}
+h3{font-size:1.2rem;font-weight:700}
+p{margin:0}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* Top bar */
+.bar{background:var(--ink);color:var(--paper);border-bottom:6px solid var(--yellow)}
+.bar-in{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px;margin-right:auto}
+.brand svg{flex:none}
+.brand b{font-family:var(--display);font-weight:900;font-size:1.6rem;letter-spacing:.01em}
+.brand small{display:block;color:#aeb6c2;font-size:.85rem;margin-top:-2px}
+.who{display:flex;align-items:center;gap:10px;font-weight:500}
+.who .role{background:var(--yellow);color:var(--ink);font-family:var(--display);font-weight:700;padding:1px 9px;border-radius:3px}
+.offline{background:var(--red);color:#fff;padding:2px 9px;border-radius:3px;font-weight:700;font-size:.9rem}
+
+main{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
+section.block{margin-top:30px}
+section.block>header{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+section.block>header p{color:var(--ink-2)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:4px;font-weight:700;cursor:pointer;min-height:42px}
+.btn:hover:not(:disabled){background:#000}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.alt{background:transparent;color:var(--ink)}
+.btn.alt:hover:not(:disabled){background:var(--apron-2)}
+.btn.go{background:var(--green);border-color:var(--green);color:#fff}
+.btn.go:hover:not(:disabled){background:#17805a}
+.btn.stop{background:var(--red);border-color:var(--red);color:#fff}
+.btn.stop:hover:not(:disabled){background:#b6322d}
+.btn.sm{min-height:34px;padding:5px 11px;font-size:.92rem}
+
+/* Panels and forms */
+.panel{background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:20px}
+.panel.hl{box-shadow:0 0 0 4px var(--yellow)}
+.panel h2{margin-bottom:4px}
+.panel .lead{color:var(--ink-2);margin-bottom:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+label.f{display:block;font-weight:700;margin-bottom:4px}
+.field{margin-bottom:14px}
+.field small{display:block;color:var(--ink-2);margin-top:3px}
+input[type=text],input[type=password],select{width:100%;background:#fff;border:2px solid var(--ink);border-radius:4px;padding:9px 11px;min-height:44px}
+input::placeholder{color:#8b929c}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+/* Auth */
+.auth{max-width:460px;margin:28px auto 0}
+.tabs{display:flex;border:2px solid var(--ink);border-radius:6px 6px 0 0;overflow:hidden;background:var(--ink)}
+.tabs button{flex:1;border:0;background:transparent;color:#c5ccd6;padding:12px;font-family:var(--display);font-weight:700;font-size:1.2rem;cursor:pointer}
+.tabs button.on{background:var(--paper);color:var(--ink)}
+.auth .panel{border-radius:0 0 6px 6px;border-top:0}
+.roles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.role-opt{position:relative}
+.role-opt input{position:absolute;opacity:0;inset:0;cursor:pointer}
+.role-opt span{display:block;border:2px solid var(--ink);border-radius:4px;padding:10px 12px;background:#fff}
+.role-opt span b{display:block;font-family:var(--display);font-size:1.25rem}
+.role-opt span small{color:var(--ink-2)}
+.role-opt input:checked+span{background:var(--yellow)}
+.role-opt input:checked+span small{color:var(--ink)}
+.role-opt input:focus-visible+span{outline:3px solid var(--blue);outline-offset:2px}
+.notice{background:var(--paper-2);border-left:6px solid var(--yellow);padding:10px 12px;margin-bottom:14px}
+.notice.ok{border-color:var(--green)}
+
+/* Runway designators */
+.rwy-pick{display:flex;gap:8px;flex-wrap:wrap}
+.rwy{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:64px;padding:6px 10px;background:var(--ink);color:#fff;border:2px solid var(--ink);border-radius:3px;font-family:var(--display);line-height:1;position:relative}
+.rwy b{font-size:1.6rem;font-weight:900}
+.rwy small{font-family:var(--body);font-size:.72rem;margin-top:3px;color:#c9d0da}
+.rwy.busy{background:repeating-linear-gradient(135deg,#7d1f1b 0 7px,var(--red) 7px 14px);border-color:#7d1f1b}
+.rwy.busy small{color:#fff;font-weight:700}
+button.rwy{cursor:pointer}
+button.rwy.sel{outline:4px solid var(--yellow);outline-offset:2px}
+button.rwy:hover{filter:brightness(1.2)}
+
+.seg{display:inline-flex;border:2px solid var(--ink);border-radius:4px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:9px 18px;font-weight:700;cursor:pointer;min-height:42px}
+.seg button+button{border-left:2px solid var(--ink)}
+.seg button.on{background:var(--ink);color:var(--paper)}
+
+/* Airports */
+.aps{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.ap{background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.ap header{display:flex;flex-direction:column;gap:6px}
+.ap h3{font-size:1.25rem}
+.atc{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:.92rem}
+.atc i{width:11px;height:11px;border-radius:50%;background:var(--grey);display:inline-block}
+.atc.on i{background:var(--green);box-shadow:0 0 0 3px #1f9d6b33}
+.atc.off{color:var(--ink-2);font-weight:500}
+.ap .rwys{display:flex;gap:8px;flex-wrap:wrap}
+.ap footer{color:var(--ink-2);font-size:.93rem}
+.ap.mine{box-shadow:0 0 0 4px var(--yellow)}
+
+/* Flight strips */
+.strips{display:flex;flex-direction:column;gap:8px}
+.strip{display:grid;grid-template-columns:70px minmax(0,1.6fr) 74px minmax(0,1.2fr) auto;align-items:stretch;background:var(--paper);border:2px solid var(--ink);border-left-width:14px;border-radius:3px}
+.strip>div{padding:9px 12px;border-left:2px dashed #b3b0a3;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.strip>div:first-child{border-left:0}
+.strip.s-pending{border-left-color:var(--yellow)}
+.strip.s-approved{border-left-color:var(--green)}
+.strip.s-denied{border-left-color:var(--red)}
+.strip.s-completed{border-left-color:var(--blue)}
+.strip.s-cancelled,.strip.s-expired{border-left-color:var(--grey)}
+.strip.s-completed,.strip.s-cancelled,.strip.s-expired,.strip.s-denied{background:var(--paper-2)}
+.strip .t{font-family:var(--display);font-weight:700;font-size:1.25rem}
+.strip .t small{display:block;font-family:var(--body);font-weight:400;font-size:.78rem;color:var(--ink-2)}
+.strip .fl{font-family:var(--display);font-weight:900;font-size:1.5rem;line-height:1.05}
+.strip .fl span{font-family:var(--body);font-weight:500;font-size:.95rem;color:var(--ink-2);margin-left:6px}
+.strip .sub{color:var(--ink-2);font-size:.92rem;overflow-wrap:anywhere}
+.strip .rw{align-items:center;text-align:center}
+.strip .rw b{font-family:var(--display);font-weight:900;font-size:1.9rem;line-height:1}
+.strip .rw small{color:var(--ink-2);font-size:.78rem}
+.status{display:inline-block;align-self:flex-start;font-weight:700;font-size:.88rem;padding:1px 9px;border-radius:3px;color:#fff}
+.status.pending{background:var(--yellow);color:var(--ink)}
+.status.approved{background:var(--green)}
+.status.denied{background:var(--red)}
+.status.completed{background:var(--blue)}
+.status.cancelled,.status.expired{background:var(--grey)}
+.strip .note{font-style:italic;font-size:.93rem;margin-top:4px;overflow-wrap:anywhere}
+.strip .act{gap:6px;align-items:stretch;min-width:210px}
+.strip .act input{min-height:36px;padding:5px 9px}
+.strip .act .row{flex-wrap:nowrap}
+.typ{display:inline-block;font-family:var(--display);font-weight:700;font-size:.95rem;padding:0 7px;border:2px solid var(--ink);border-radius:3px;margin-left:8px;vertical-align:2px}
+@media(max-width:820px){
+  .strip{grid-template-columns:62px 1fr 64px}
+  .strip>div:nth-child(4){grid-column:1/-1;border-left:0;border-top:2px dashed #b3b0a3}
+  .strip>.act{grid-column:1/-1;border-left:0;border-top:2px dashed #b3b0a3}
+}
+.empty{background:var(--paper-2);border:2px dashed var(--grey);border-radius:6px;padding:18px;color:var(--ink-2)}
+
+/* Admin table */
+.tbl{width:100%;border-collapse:collapse;background:var(--paper);border:2px solid var(--ink)}
+.tbl th,.tbl td{text-align:left;padding:9px 12px;border-bottom:1px solid #c9c6ba;vertical-align:middle}
+.tbl th{background:var(--ink);color:var(--paper);font-family:var(--display);font-size:1.05rem;font-weight:700}
+.tbl .acts{display:flex;gap:6px;flex-wrap:wrap}
+.scroll{overflow-x:auto}
+.pillrole{font-family:var(--display);font-weight:700;border:2px solid var(--ink);border-radius:3px;padding:0 7px}
+
+/* Toasts */
+#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(380px,calc(100vw - 32px))}
+.toast{background:var(--ink);color:#fff;border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px;font-weight:500;box-shadow:0 6px 20px #0004}
+.toast.ok{border-color:var(--green)}
+.toast.err{border-color:var(--red)}
+
+.splash{padding:80px 20px;text-align:center;color:var(--ink-2);font-family:var(--display);font-size:1.4rem}
+@media(prefers-reduced-motion:no-preference){
+  .toast{animation:tin .18s ease-out}
+  @keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+}
+</style>
+</head>
+<body>
+<div id="app"><div class="splash">Laddar…</div></div>
+<div id="toasts" aria-live="polite"></div>
+<noscript><p style="padding:20px">Den här sidan kräver JavaScript.</p></noscript>
+
+<script>
+"use strict";
+/* ---------- Konstanter ---------- */
+const ACTIVE = ["pending", "approved"];
+const STATUS = { pending: "Väntar", approved: "Godkänd", denied: "Nekad", completed: "Genomförd", cancelled: "Avbruten", expired: "Utgången" };
+const TYPE = { landing: "Landning", takeoff: "Start" };
+const ROLE = { pilot: "Pilot", atc: "ATC", admin: "Admin" };
+const POLL_MS = 8000;
+
+/* ---------- Tillstånd ---------- */
+const S = { token: null, me: null, data: null, users: null, sig: "", offline: false, booting: true };
+const ui = {
+  tab: "login",
+  login: { username: "", password: "" },
+  reg: { username: "", password: "", password2: "", role: "pilot" },
+  profile: { flightNumber: "", airline: "" },
+  profileInit: false,
+  pilot: { airport: "", runway: "", type: "landing" },
+  atcAirport: "",
+  notes: {},
+  regDone: false,
+};
+try { S.token = localStorage.getItem("edu_token"); } catch (e) {}
+
+const $ = (s) => document.querySelector(s);
+const app = $("#app");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clock = (t) => (t ? new Date(t).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : "");
+const dayLabel = (t) => new Date(t).toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
+function setPath(o, path, v) {
+  const p = path.split(".");
+  while (p.length > 1) o = o[p.shift()] ??= {};
+  o[p[0]] = v;
+}
+
+/* ---------- API ---------- */
+async function api(path, { method = "GET", body } = {}) {
+  let res;
+  try {
+    res = await fetch("/api/" + path, {
+      method,
+      headers: { "Content-Type": "application/json", ...(S.token ? { Authorization: "Bearer " + S.token } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    const err = new Error("Ingen kontakt med servern. Kontrollera din anslutning.");
+    err.network = true;
+    throw err;
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const err = new Error((data && data.error) || "Något gick fel (" + res.status + ").");
+    err.status = res.status;
+    if (res.status === 401 && S.token && path !== "login") forceLogout("Du har loggats ut. Logga in igen.");
+    throw err;
+  }
+  return data;
+}
+
+function toast(msg, kind = "info") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.textContent = msg;
+  $("#toasts").appendChild(t);
+  setTimeout(() => t.remove(), 4800);
+}
+
+function forceLogout(msg) {
+  S.token = null; S.me = null; S.data = null; S.users = null; S.sig = ""; ui.profileInit = false;
+  try { localStorage.removeItem("edu_token"); } catch (e) {}
+  stopPolling();
+  if (msg) toast(msg, "err");
+  render();
+}
+
+/* ---------- Hämta och rita ---------- */
+async function refresh(force) {
+  if (!S.token) return;
+  try {
+    const [data, users] = await Promise.all([api("state"), S.me && S.me.role === "admin" ? api("admin/users") : Promise.resolve(null)]);
+    S.offline = false;
+    S.me = data.me;
+    S.users = users ? users.users : null;
+    if (!ui.profileInit) {
+      ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "" };
+      ui.atcAirport = S.me.airport || "";
+      ui.profileInit = true;
+    }
+    const sig = JSON.stringify([data, users, S.offline]);
+    if (sig !== S.sig || force) { S.sig = sig; S.data = data; render(); }
+  } catch (e) {
+    if (e.network && !S.offline) { S.offline = true; S.sig = ""; render(); }
+  } finally {
+    S.booting = false;
+  }
+}
+
+let timer = null;
+function startPolling() { stopPolling(); timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS); }
+function stopPolling() { if (timer) clearInterval(timer); timer = null; }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && S.me) refresh(); });
+
+function render() {
+  const ae = document.activeElement;
+  const key = ae && ae.dataset && ae.dataset.bind;
+  let s = null, e = null;
+  if (key && typeof ae.selectionStart === "number") { s = ae.selectionStart; e = ae.selectionEnd; }
+  app.innerHTML = view();
+  if (key) {
+    const n = app.querySelector('[data-bind="' + key + '"]');
+    if (n) { n.focus(); if (s !== null) { try { n.setSelectionRange(s, e); } catch (x) {} } }
+  }
+}
+
+/* ---------- Vyer ---------- */
+const logo = `<svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true"><rect width="38" height="38" rx="4" fill="#f0b90b"/><path d="M19 5v28" stroke="#1d2229" stroke-width="3" stroke-dasharray="5 4"/><path d="M8 33V12m22 21V12" stroke="#1d2229" stroke-width="2"/></svg>`;
+
+function view() {
+  if (S.booting && S.token && !S.me) return `<div class="splash">Laddar…</div>`;
+  if (!S.me || !S.data) return shell(authView(), false);
+  let body = "";
+  if (S.me.role === "pilot") body = pilotView();
+  else if (S.me.role === "atc") body = atcView();
+  else body = adminView();
+  return shell(body, true);
+}
+
+function shell(body, loggedIn) {
+  return `<div class="bar"><div class="bar-in">
+    <div class="brand">${logo}<div><b>EDU Flygledning</b><small>Landnings- och starttillstånd på EDU</small></div></div>
+    ${S.offline ? `<span class="offline">Ingen anslutning</span>` : ""}
+    ${loggedIn ? `<div class="who"><span>${esc(S.me.username)}</span><span class="role">${ROLE[S.me.role]}</span><button class="btn alt sm" style="color:#f7f5ee;border-color:#f7f5ee" data-action="logout">Logga ut</button></div>` : ""}
+  </div></div><main>${body}</main>`;
+}
+
+function authView() {
+  const isLogin = ui.tab === "login";
+  return `<div class="auth">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="${isLogin}" class="${isLogin ? "on" : ""}" data-action="tab" data-v="login">Logga in</button>
+      <button role="tab" aria-selected="${!isLogin}" class="${!isLogin ? "on" : ""}" data-action="tab" data-v="register">Skapa konto</button>
+    </div>
+    <div class="panel">
+    ${isLogin ? `
+      <form data-form="login" autocomplete="on">
+        ${ui.regDone ? `<div class="notice ok">Kontot är skapat. Du kan logga in så fort admin har godkänt det.</div>` : ""}
+        <div class="field"><label class="f" for="lu">Minecraft-användarnamn</label>
+          <input id="lu" type="text" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="64" data-bind="login.username" value="${esc(ui.login.username)}" required></div>
+        <div class="field"><label class="f" for="lp">Lösenord</label>
+          <input id="lp" type="password" name="password" autocomplete="current-password" maxlength="200" data-bind="login.password" value="${esc(ui.login.password)}" required></div>
+        <button class="btn" type="submit" style="width:100%">Logga in</button>
+      </form>` : `
+      <form data-form="register" autocomplete="off">
+        <div class="notice">Alla nya konton måste godkännas av admin innan du kan logga in.</div>
+        <div class="field"><label class="f" for="ru">Minecraft-användarnamn</label>
+          <input id="ru" type="text" autocapitalize="off" spellcheck="false" maxlength="16" data-bind="reg.username" value="${esc(ui.reg.username)}" required>
+          <small>Skriv ditt exakta namn i Minecraft, 3–16 tecken (A–Z, 0–9 och _).</small></div>
+        <div class="field"><label class="f" for="rp">Lösenord</label>
+          <input id="rp" type="password" autocomplete="new-password" maxlength="100" data-bind="reg.password" value="${esc(ui.reg.password)}" required>
+          <small>Minst 6 tecken. Använd inte samma lösenord som i Minecraft.</small></div>
+        <div class="field"><label class="f" for="rp2">Upprepa lösenordet</label>
+          <input id="rp2" type="password" autocomplete="new-password" maxlength="100" data-bind="reg.password2" value="${esc(ui.reg.password2)}" required></div>
+        <div class="field"><span class="f" style="display:block;font-weight:700;margin-bottom:4px">Kontotyp</span>
+          <div class="roles">
+            <label class="role-opt"><input type="radio" name="role" value="pilot" data-bind="reg.role" ${ui.reg.role === "pilot" ? "checked" : ""}><span><b>Pilot</b><small>Begär tillstånd att landa och lyfta</small></span></label>
+            <label class="role-opt"><input type="radio" name="role" value="atc" data-bind="reg.role" ${ui.reg.role === "atc" ? "checked" : ""}><span><b>ATC</b><small>Svarar på förfrågningar vid en flygplats</small></span></label>
+          </div></div>
+        <button class="btn" type="submit" style="width:100%">Skapa konto</button>
+      </form>`}
+    </div></div>`;
+}
+
+/* --- Delade komponenter --- */
+const airportById = (id) => (S.data.airports || []).find((a) => a.id === id);
+
+function runwayBlock(rw, st, extra = "") {
+  return `<div class="rwy ${st ? "busy" : ""}" title="${st ? esc(st.flightNumber + " – " + TYPE[st.type]) : "Ledig"}"><b>${esc(rw)}</b><small>${st ? esc(st.flightNumber) : "Ledig"}</small>${extra}</div>`;
+}
+
+function airportCard(a, mine) {
+  const on = a.atc.length > 0;
+  return `<article class="ap ${mine ? "mine" : ""}">
+    <header><h3>${esc(a.name)}</h3>
+      <span class="atc ${on ? "on" : "off"}"><i></i>${on ? "ATC på plats: " + a.atc.map(esc).join(", ") : "Ingen ATC på plats"}</span></header>
+    <div class="rwys">${a.runways.map((rw) => runwayBlock(rw, a.runwayStatus[rw])).join("")}</div>
+    ${a.pending ? `<footer>${a.pending} ${a.pending === 1 ? "väntande förfrågan" : "väntande förfrågningar"}</footer>` : ""}
+  </article>`;
+}
+const airportGrid = (mineId) => `<div class="aps">${S.data.airports.map((a) => airportCard(a, a.id === mineId)).join("")}</div>`;
+
+function strip(r, { actions = "", showPilot = false } = {}) {
+  const ap = airportById(r.airport);
+  return `<article class="strip s-${r.status}">
+    <div class="t">${clock(r.createdAt)}<small>${dayLabel(r.createdAt)}</small></div>
+    <div><div class="fl">${esc(r.flightNumber)}<span>${esc(r.airline)}</span></div>
+      <div class="sub">${showPilot ? esc(r.pilot) + " · " : ""}${esc(ap ? ap.name : r.airport)}</div></div>
+    <div class="rw"><b>${esc(r.runway)}</b><small>bana</small></div>
+    <div><span class="status ${r.status}">${STATUS[r.status]} · ${TYPE[r.type]}</span>
+      ${r.note ? `<div class="note">”${esc(r.note)}”${r.decidedBy ? " – " + esc(r.decidedBy) : ""}</div>` : ""}</div>
+    ${actions ? `<div class="act">${actions}</div>` : ""}
+  </article>`;
+}
+const empty = (msg) => `<div class="empty">${msg}</div>`;
+
+/* --- Pilot --- */
+function pilotView() {
+  const me = S.me, d = S.data;
+  const ready = !!(me.flightNumber && me.airline);
+  const active = d.requests.find((r) => ACTIVE.includes(r.status));
+  const history = d.requests.filter((r) => !ACTIVE.includes(r.status));
+  const ap = d.airports.find((a) => a.id === ui.pilot.airport);
+  if (ap && ap.runways.length === 1) ui.pilot.runway = ap.runways[0];
+  if (ap && !ap.runways.includes(ui.pilot.runway)) ui.pilot.runway = "";
+  const locked = !ready || !!active;
+  const canSend = !locked && ap && ui.pilot.runway;
+
+  let activeBlock = "";
+  if (active) {
+    const aap = airportById(active.airport);
+    const noAtc = aap && aap.atc.length === 0;
+    activeBlock = `<section class="block"><header><h2>Din förfrågan</h2>
+      <p>${active.status === "pending" ? (noAtc ? "Ingen ATC är på plats just nu. Förfrågan ligger kvar i 30 minuter." : "Väntar på svar från ATC.") : "Du har tillstånd. Följ ATC:s instruktioner."}</p></header>
+      <div class="strips">${strip(active, { actions: `<button class="btn alt sm" data-action="cancel" data-id="${esc(active.id)}">${active.status === "approved" ? "Avsluta tillstånd" : "Avbryt förfrågan"}</button>` })}</div></section>`;
+  }
+
+  return `${activeBlock}
+  <section class="block"><div class="grid2">
+    <div class="panel ${ready ? "" : "hl"}">
+      <h2>Ditt flyg</h2>
+      <p class="lead">${ready ? "Dessa uppgifter följer med dina förfrågningar." : "Fyll i flygnummer och flygbolag innan du kan begära tillstånd."}</p>
+      <form data-form="profile">
+        <div class="field"><label class="f" for="fn">Flygnummer</label>
+          <input id="fn" type="text" maxlength="12" autocapitalize="characters" placeholder="till exempel EDU101" data-bind="profile.flightNumber" value="${esc(ui.profile.flightNumber)}" required></div>
+        <div class="field"><label class="f" for="al">Flygbolag</label>
+          <input id="al" type="text" maxlength="40" placeholder="till exempel EDU Airways" data-bind="profile.airline" value="${esc(ui.profile.airline)}" required></div>
+        <button class="btn" type="submit">Spara flyg</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Begär tillstånd</h2>
+      <p class="lead">${active ? "Du har redan en aktiv förfrågan." : !ready ? "Spara ditt flyg först." : "Välj flygplats, bana och vad du vill göra."}</p>
+      <form data-form="request">
+        <div class="field"><label class="f" for="apsel">Flygplats</label>
+          <select id="apsel" data-bind="pilot.airport" ${locked ? "disabled" : ""}>
+            <option value="">Välj flygplats</option>
+            ${d.airports.map((a) => `<option value="${esc(a.id)}" ${a.id === ui.pilot.airport ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+          </select>
+          ${ap ? `<small>${ap.atc.length ? "ATC på plats: " + ap.atc.map(esc).join(", ") : "Ingen ATC är på plats just nu."}</small>` : ""}</div>
+        ${ap ? `<div class="field"><span class="f" style="display:block;font-weight:700;margin-bottom:6px">Bana</span><div class="rwy-pick">
+          ${ap.runways.map((rw) => { const st = ap.runwayStatus[rw]; return `<button type="button" class="rwy ${st ? "busy" : ""} ${ui.pilot.runway === rw ? "sel" : ""}" data-action="pick-runway" data-v="${esc(rw)}" aria-pressed="${ui.pilot.runway === rw}" ${locked ? "disabled" : ""}><b>${esc(rw)}</b><small>${st ? "Upptagen" : "Ledig"}</small></button>`; }).join("")}
+        </div></div>` : ""}
+        <div class="field"><span class="f" style="display:block;font-weight:700;margin-bottom:6px">Jag vill</span>
+          <div class="seg"><button type="button" class="${ui.pilot.type === "landing" ? "on" : ""}" data-action="pick-type" data-v="landing" ${locked ? "disabled" : ""}>Landa</button><button type="button" class="${ui.pilot.type === "takeoff" ? "on" : ""}" data-action="pick-type" data-v="takeoff" ${locked ? "disabled" : ""}>Lyfta</button></div></div>
+        <button class="btn go" type="submit" ${canSend ? "" : "disabled"}>Skicka förfrågan</button>
+      </form>
+    </div>
+  </div></section>
+  <section class="block"><header><h2>Flygplatser just nu</h2><p>Röda banor har pågående tillstånd.</p></header>${airportGrid(ui.pilot.airport)}</section>
+  <section class="block"><header><h2>Dina tidigare förfrågningar</h2></header>
+    ${history.length ? `<div class="strips">${history.map((r) => strip(r)).join("")}</div>` : empty("Inga tidigare förfrågningar än.")}</section>`;
+}
+
+/* --- ATC --- */
+function atcView() {
+  const me = S.me, d = S.data;
+  const myAp = airportById(me.airport);
+  const pending = d.requests.filter((r) => r.status === "pending").reverse();
+  const approved = d.requests.filter((r) => r.status === "approved");
+  const history = d.requests.filter((r) => !ACTIVE.includes(r.status));
+
+  const duty = `<section class="block"><div class="panel ${myAp ? "" : "hl"}"><h2>${myAp ? "Du är på tjänst" : "Gå på tjänst"}</h2>
+    <p class="lead">${myAp ? "Du ser och hanterar förfrågningar för " + esc(myAp.name) + "." : "Välj vilken flygplats du är på för att ta emot förfrågningar."}</p>
+    <form data-form="duty"><div class="row">
+      <div style="flex:1;min-width:240px"><label class="f" for="dsel" style="position:absolute;left:-9999px">Flygplats</label>
+      <select id="dsel" data-bind="atcAirport"><option value="">Välj flygplats</option>
+        ${d.airports.map((a) => `<option value="${esc(a.id)}" ${a.id === ui.atcAirport ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>
+      <button class="btn go" type="submit" ${ui.atcAirport && ui.atcAirport !== me.airport ? "" : "disabled"}>${myAp ? "Byt flygplats" : "Gå på tjänst"}</button>
+      ${myAp ? `<button class="btn alt" type="button" data-action="duty-off">Gå av tjänst</button>` : ""}
+    </div></form></div></section>`;
+
+  if (!myAp) return duty + `<section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>`;
+
+  const pendingActions = (r) => `<input type="text" maxlength="140" placeholder="Meddelande till piloten (valfritt)" aria-label="Meddelande till piloten" data-bind="notes.${esc(r.id)}" value="${esc(ui.notes[r.id] || "")}">
+    <div class="row"><button class="btn go sm" data-action="decide" data-act="approve" data-id="${esc(r.id)}">Godkänn</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Neka</button></div>`;
+  const approvedActions = (r) => `<div class="row"><button class="btn sm" data-action="decide" data-act="complete" data-id="${esc(r.id)}">Banan är fri</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Återkalla</button></div>`;
+
+  return `${duty}
+  <section class="block"><header><h2>Banor vid ${esc(myAp.name)}</h2></header>
+    <div class="aps">${airportCard(myAp, false)}</div></section>
+  <section class="block"><header><h2>Väntande förfrågningar</h2><p>Äldst först.</p></header>
+    ${pending.length ? `<div class="strips">${pending.map((r) => strip(r, { showPilot: true, actions: pendingActions(r) })).join("")}</div>` : empty("Inga väntande förfrågningar just nu.")}</section>
+  <section class="block"><header><h2>Pågående tillstånd</h2></header>
+    ${approved.length ? `<div class="strips">${approved.map((r) => strip(r, { showPilot: true, actions: approvedActions(r) })).join("")}</div>` : empty("Inga banor är upptagna.")}</section>
+  <section class="block"><header><h2>Historik</h2></header>
+    ${history.length ? `<div class="strips">${history.slice(0, 30).map((r) => strip(r, { showPilot: true })).join("")}</div>` : empty("Ingen historik än.")}</section>
+  <section class="block"><header><h2>Alla flygplatser</h2></header>${airportGrid(me.airport)}</section>`;
+}
+
+/* --- Admin --- */
+function adminView() {
+  const users = S.users || [];
+  const pend = users.filter((u) => u.status === "pending");
+  const stLabel = { pending: "Väntar", approved: "Godkänd", rejected: "Nekad" };
+  const stClass = { pending: "pending", approved: "approved", rejected: "denied" };
+  const detail = (u) => (u.role === "pilot" ? (u.flightNumber ? esc(u.flightNumber) + " · " + esc(u.airline) : "Inget flyg registrerat") : u.airport ? esc((airportById(u.airport) || {}).name || u.airport) : "Ingen flygplats vald");
+  const btn = (u, act, label, cls) => `<button class="btn ${cls} sm" data-action="user-act" data-name="${esc(u.username)}" data-act="${act}">${label}</button>`;
+
+  const pendCards = pend.length
+    ? `<div class="strips">${pend.map((u) => `<article class="strip s-pending" style="grid-template-columns:minmax(0,2fr) auto">
+        <div><div class="fl">${esc(u.username)}<span>${ROLE[u.role]}</span></div><div class="sub">Skapat ${dayLabel(u.createdAt)} ${clock(u.createdAt)}</div></div>
+        <div class="act"><div class="row">${btn(u, "approve", "Godkänn", "go")}${btn(u, "reject", "Neka", "stop")}</div></div></article>`).join("")}</div>`
+    : empty("Inga konton väntar på godkännande.");
+
+  const rows = users.map((u) => `<tr>
+    <td><b>${esc(u.username)}</b></td><td><span class="pillrole">${ROLE[u.role]}</span></td>
+    <td><span class="status ${stClass[u.status]}">${stLabel[u.status]}</span></td><td>${detail(u)}</td>
+    <td><div class="acts">${u.status !== "approved" ? btn(u, "approve", "Godkänn", "go") : btn(u, "reject", "Spärra", "alt")}
+      ${btn(u, "password", "Nytt lösenord", "alt")}${btn(u, "delete", "Ta bort", "stop")}</div></td></tr>`).join("");
+
+  return `<section class="block"><header><h2>Konton som väntar</h2><p>${pend.length} ${pend.length === 1 ? "konto" : "konton"}</p></header>${pendCards}</section>
+  <section class="block"><header><h2>Alla konton</h2></header>
+    ${users.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Användare</th><th>Typ</th><th>Status</th><th>Uppgifter</th><th>Åtgärder</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Det finns inga konton än.")}</section>
+  <section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>
+  <section class="block"><header><h2>Senaste förfrågningar</h2></header>
+    ${S.data.requests.length ? `<div class="strips">${S.data.requests.slice(0, 30).map((r) => strip(r, { showPilot: true })).join("")}</div>` : empty("Inga förfrågningar än.")}</section>`;
+}
+
+/* ---------- Händelser ---------- */
+document.addEventListener("input", (e) => {
+  const b = e.target.dataset && e.target.dataset.bind;
+  if (b && e.target.type !== "radio") setPath(ui, b, e.target.value);
+});
+document.addEventListener("change", (e) => {
+  const t = e.target, b = t.dataset && t.dataset.bind;
+  if (!b) return;
+  setPath(ui, b, t.value);
+  if (b === "pilot.airport") { ui.pilot.runway = ""; render(); }
+  else if (b === "atcAirport" || b === "reg.role") render();
+});
+
+async function call(path, body, okMsg) {
+  await api(path, { method: "POST", body });
+  if (okMsg) toast(okMsg, "ok");
+  await refresh(true);
+}
+
+document.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.dataset && e.target.dataset.form;
+  if (!f) return;
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  try {
+    if (f === "login") {
+      const r = await api("login", { method: "POST", body: { username: ui.login.username.trim(), password: ui.login.password } });
+      S.token = r.token; S.me = r.user; ui.login.password = ""; ui.regDone = false; ui.profileInit = false;
+      try { localStorage.setItem("edu_token", r.token); } catch (x) {}
+      await refresh(true);
+      startPolling();
+    } else if (f === "register") {
+      if (ui.reg.password !== ui.reg.password2) throw new Error("Lösenorden är inte likadana.");
+      await api("register", { method: "POST", body: { username: ui.reg.username.trim(), password: ui.reg.password, role: ui.reg.role } });
+      ui.login.username = ui.reg.username.trim();
+      ui.reg = { username: "", password: "", password2: "", role: "pilot" };
+      ui.regDone = true; ui.tab = "login"; render();
+    } else if (f === "profile") {
+      await call("profile", { flightNumber: ui.profile.flightNumber, airline: ui.profile.airline }, "Flyget är sparat.");
+      ui.profileInit = false; await refresh(true);
+    } else if (f === "request") {
+      await call("requests", { airport: ui.pilot.airport, runway: ui.pilot.runway, type: ui.pilot.type }, "Förfrågan skickad.");
+    } else if (f === "duty") {
+      await call("profile", { airport: ui.atcAirport }, "Du är på tjänst.");
+    }
+  } catch (err) {
+    toast(err.message, "err");
+  } finally {
+    if (btn && btn.isConnected) btn.disabled = false;
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-action]");
+  if (!el || el.disabled) return;
+  const a = el.dataset.action;
+  try {
+    if (a === "tab") { ui.tab = el.dataset.v; render(); }
+    else if (a === "logout") {
+      try { await api("logout", { method: "POST" }); } catch (x) {}
+      forceLogout();
+    }
+    else if (a === "pick-runway") { ui.pilot.runway = el.dataset.v; render(); }
+    else if (a === "pick-type") { ui.pilot.type = el.dataset.v; render(); }
+    else if (a === "cancel") {
+      el.disabled = true;
+      await call("requests/" + encodeURIComponent(el.dataset.id) + "/cancel", {}, "Förfrågan avslutad.");
+    }
+    else if (a === "decide") {
+      el.disabled = true;
+      const id = el.dataset.id, act = el.dataset.act;
+      await call("requests/" + encodeURIComponent(id) + "/decide", { action: act, note: ui.notes[id] || "" },
+        { approve: "Godkänd.", deny: "Nekad.", complete: "Banan är fri." }[act]);
+      delete ui.notes[id];
+    }
+    else if (a === "duty-off") { await call("profile", { airport: null }, "Du är av tjänst."); ui.atcAirport = ""; render(); }
+    else if (a === "user-act") {
+      const name = el.dataset.name, act = el.dataset.act;
+      let body = {};
+      if (act === "delete" && !confirm("Ta bort kontot " + name + "? Det går inte att ångra.")) return;
+      if (act === "password") {
+        const pw = prompt("Nytt lösenord för " + name + " (minst 6 tecken):");
+        if (!pw) return;
+        body = { password: pw };
+      }
+      el.disabled = true;
+      await call("admin/users/" + encodeURIComponent(name) + "/" + act, body,
+        { approve: "Kontot är godkänt.", reject: "Kontot är nekat.", delete: "Kontot är borttaget.", password: "Lösenordet är bytt." }[act]);
+    }
+  } catch (err) {
+    toast(err.message, "err");
+    if (el.isConnected) el.disabled = false;
+    refresh(true);
+  }
+});
+
+/* ---------- Start ---------- */
+if (S.token) { refresh(true).then(() => { if (S.me) startPolling(); else render(); }); }
+else { S.booting = false; render(); }
+</script>
+</body>
+</html>
