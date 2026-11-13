@@ -7,7 +7,7 @@
 <meta name="description" content="Flygledning för Minecraft-servern EDU: begär tillstånd att landa och lyfta, och styr trafiken som ATC.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Condensed:wght@500;700;900&family=Sofia+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Condensed:wght@500;700;900&family=Sofia+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
 :root{
   --apron:#cfd2cb;
@@ -168,6 +168,20 @@ button.rwy:hover{filter:brightness(1.2)}
 .scroll{overflow-x:auto}
 .pillrole{font-family:var(--display);font-weight:700;border:2px solid var(--ink);border-radius:3px;padding:0 7px}
 
+/* ACARS: utskrifter som från cockpitskrivaren */
+.hd-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.acars-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:20px;align-items:start}
+@media(max-width:820px){.acars-grid{grid-template-columns:1fr}}
+.tpl{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tpl button{border:2px solid var(--ink);background:#fff;border-radius:3px;padding:4px 10px;font-weight:500;cursor:pointer;font-size:.92rem}
+.tpl button:hover{background:var(--yellow)}
+.slip-list{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto;padding:2px}
+.slip{background:#fffef6;border:1px solid #bdb9a8;border-left:8px solid var(--blue);padding:10px 12px;font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;box-shadow:0 1px 0 #0002}
+.slip.atc{border-left-color:var(--yellow)}
+.slip .hd{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;color:var(--ink-2);font-size:.8rem;border-bottom:1px dashed #b3b0a3;padding-bottom:5px;margin-bottom:6px}
+.slip .tx{overflow-wrap:anywhere}
+.slip .sa{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+
 /* Toasts */
 #toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(380px,calc(100vw - 32px))}
 .toast{background:var(--ink);color:#fff;border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px;font-weight:500;box-shadow:0 6px 20px #0004}
@@ -196,7 +210,7 @@ const ROLE = { pilot: "Pilot", atc: "ATC", admin: "Admin" };
 const POLL_MS = 8000;
 
 /* ---------- Tillstånd ---------- */
-const S = { token: null, me: null, data: null, users: null, sig: "", offline: false, booting: true };
+const S = { token: null, me: null, data: null, users: null, sig: "", offline: false, booting: true, knownMsgs: null };
 const ui = {
   tab: "login",
   login: { username: "", password: "" },
@@ -206,6 +220,7 @@ const ui = {
   pilot: { airport: "", runway: "", type: "landing" },
   atcAirport: "",
   notes: {},
+  acars: { airport: "", to: "", text: "" },
   regDone: false,
 };
 try { S.token = localStorage.getItem("edu_token"); } catch (e) {}
@@ -255,7 +270,8 @@ function toast(msg, kind = "info") {
 }
 
 function forceLogout(msg) {
-  S.token = null; S.me = null; S.data = null; S.users = null; S.sig = ""; ui.profileInit = false;
+  S.token = null; S.me = null; S.data = null; S.users = null; S.sig = ""; S.knownMsgs = null; ui.profileInit = false;
+  ui.acars = { airport: "", to: "", text: "" };
   try { localStorage.removeItem("edu_token"); } catch (e) {}
   stopPolling();
   if (msg) toast(msg, "err");
@@ -270,6 +286,16 @@ async function refresh(force) {
     S.offline = false;
     S.me = data.me;
     S.users = users ? users.users : null;
+    if (S.me.role !== "admin") {
+      const msgs = data.messages || [];
+      if (S.knownMsgs) {
+        for (const m of msgs) {
+          if (m.from !== S.me.username && !S.knownMsgs.has(m.id))
+            toast("ACARS från " + (m.fromRole === "pilot" ? m.flightNumber || m.from : "ATC " + m.from) + ": " + m.text, "info");
+        }
+      }
+      S.knownMsgs = new Set(msgs.map((m) => m.id));
+    }
     if (!ui.profileInit) {
       ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "" };
       ui.atcAirport = S.me.airport || "";
@@ -391,6 +417,66 @@ function strip(r, { actions = "", showPilot = false } = {}) {
 }
 const empty = (msg) => `<div class="empty">${msg}</div>`;
 
+/* --- ACARS --- */
+const PILOT_TPL = ["Begär pushback", "Begär taxning", "Redo för start", "Anflygning, cirka 5 minuter kvar", "Har landat och lämnat banan", "Behöver hjälp"];
+const ATC_TPL = ["Pushback godkänd", "Taxa till banan och håll", "Håll position", "Gör en ny runda", "Banan är fri", "Kontakta mig igen om 2 minuter"];
+
+function slip(m, { reply = false, admin = false } = {}) {
+  const ap = airportById(m.airport);
+  const apName = ap ? ap.name : m.airport;
+  const pilotLabel = (flight, name) => (flight ? esc(flight) + " (" + esc(name) + ")" : esc(name));
+  const from = m.fromRole === "pilot" ? pilotLabel(m.flightNumber, m.from) : "ATC " + esc(m.from) + (admin ? ", " + esc(apName) : "");
+  const to = m.fromRole === "pilot" ? "ATC " + esc(apName) : pilotLabel(m.toFlight, m.to);
+  const actions =
+    (reply && m.fromRole === "pilot" ? `<button class="btn alt sm" data-action="acars-reply" data-to="${esc(m.from)}">Svara</button>` : "") +
+    (admin ? `<button class="btn stop sm" data-action="admin-del-msg" data-id="${esc(m.id)}">Ta bort</button>` : "");
+  return `<article class="slip ${m.fromRole}"><div class="hd"><span>${clock(m.createdAt)} · ${dayLabel(m.createdAt)}</span><span>${from} → ${to}</span></div>
+    <div class="tx">${esc(m.text)}</div>${actions ? `<div class="sa">${actions}</div>` : ""}</article>`;
+}
+const slipList = (msgs, opts) => (msgs.length ? `<div class="slip-list">${msgs.map((m) => slip(m, opts)).join("")}</div>` : empty("Inga ACARS-meddelanden än."));
+const tplButtons = (list) => `<div class="tpl">${list.map((t) => `<button type="button" data-action="acars-tpl" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>`;
+const acarsText = () => `<div class="field"><label class="f" for="at">Meddelande</label>
+  <input id="at" type="text" maxlength="200" autocomplete="off" placeholder="Skriv eller välj en snabbtext" data-bind="acars.text" value="${esc(ui.acars.text)}"></div>`;
+
+function pilotAcars() {
+  const d = S.data;
+  const active = d.requests.find((r) => ACTIVE.includes(r.status));
+  if (!ui.acars.airport) ui.acars.airport = active ? active.airport : ui.pilot.airport || "";
+  return `<section class="block"><header><h2>ACARS</h2><p>Skicka korta textmeddelanden till ATC och läs svaren.</p></header>
+    <div class="acars-grid"><div class="panel"><form data-form="acars">
+      <div class="field"><label class="f" for="aa">Skicka till ATC vid</label>
+        <select id="aa" data-bind="acars.airport"><option value="">Välj flygplats</option>
+        ${d.airports.map((a) => `<option value="${esc(a.id)}" ${a.id === ui.acars.airport ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>
+      ${tplButtons(PILOT_TPL)}${acarsText()}
+      <button class="btn" type="submit">Skicka ACARS</button>
+    </form></div>
+    <div>${slipList(d.messages || [], {})}</div></div></section>`;
+}
+
+function atcAcars() {
+  const d = S.data, contacts = d.contacts || [];
+  if (!contacts.some((c) => c.username === ui.acars.to)) ui.acars.to = contacts.length === 1 ? contacts[0].username : "";
+  const opts = contacts.map((c) => `<option value="${esc(c.username)}" ${c.username === ui.acars.to ? "selected" : ""}>${esc(c.flightNumber ? c.flightNumber + " (" + c.username + ")" : c.username)}</option>`).join("");
+  return `<section class="block"><header><h2>ACARS</h2><p>Meddelanden till och från piloter vid din flygplats.</p></header>
+    <div class="acars-grid"><div class="panel">
+    ${contacts.length ? `<form data-form="acars">
+      <div class="field"><label class="f" for="ato">Skicka till pilot</label>
+        <select id="ato" data-bind="acars.to"><option value="">Välj pilot</option>${opts}</select></div>
+      ${tplButtons(ATC_TPL)}${acarsText()}
+      <button class="btn" type="submit">Skicka ACARS</button></form>`
+      : `<p class="lead" style="margin:0">Det finns inga piloter att skriva till än. De dyker upp här när någon har skickat en förfrågan eller ett meddelande till din flygplats.</p>`}
+    </div><div>${slipList(d.messages || [], { reply: true })}</div></div></section>`;
+}
+
+function adminAcars() {
+  const msgs = S.data.messages || [];
+  return `<section class="block"><header><h2>ACARS-logg</h2><p>${msgs.length} ${msgs.length === 1 ? "meddelande" : "meddelanden"} de senaste 24 timmarna</p>
+    ${msgs.length ? `<div class="hd-actions"><button class="btn stop sm" data-action="admin-clear-msg">Ta bort alla meddelanden</button></div>` : ""}</header>
+    ${slipList(msgs, { admin: true })}</section>`;
+}
+
+const adminReqActions = (r) => `<div class="row">${r.status === "approved" ? `<button class="btn sm" data-action="decide" data-act="complete" data-id="${esc(r.id)}">Banan är fri</button>` : ""}<button class="btn stop sm" data-action="admin-del-req" data-id="${esc(r.id)}">Ta bort</button></div>`;
+
 /* --- Pilot --- */
 function pilotView() {
   const me = S.me, d = S.data;
@@ -444,6 +530,7 @@ function pilotView() {
       </form>
     </div>
   </div></section>
+  ${pilotAcars()}
   <section class="block"><header><h2>Flygplatser just nu</h2><p>Röda banor har pågående tillstånd.</p></header>${airportGrid(ui.pilot.airport)}</section>
   <section class="block"><header><h2>Dina tidigare förfrågningar</h2></header>
     ${history.length ? `<div class="strips">${history.map((r) => strip(r)).join("")}</div>` : empty("Inga tidigare förfrågningar än.")}</section>`;
@@ -480,6 +567,7 @@ function atcView() {
     ${pending.length ? `<div class="strips">${pending.map((r) => strip(r, { showPilot: true, actions: pendingActions(r) })).join("")}</div>` : empty("Inga väntande förfrågningar just nu.")}</section>
   <section class="block"><header><h2>Pågående tillstånd</h2></header>
     ${approved.length ? `<div class="strips">${approved.map((r) => strip(r, { showPilot: true, actions: approvedActions(r) })).join("")}</div>` : empty("Inga banor är upptagna.")}</section>
+  ${atcAcars()}
   <section class="block"><header><h2>Historik</h2></header>
     ${history.length ? `<div class="strips">${history.slice(0, 30).map((r) => strip(r, { showPilot: true })).join("")}</div>` : empty("Ingen historik än.")}</section>
   <section class="block"><header><h2>Alla flygplatser</h2></header>${airportGrid(me.airport)}</section>`;
@@ -510,8 +598,10 @@ function adminView() {
   <section class="block"><header><h2>Alla konton</h2></header>
     ${users.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Användare</th><th>Typ</th><th>Status</th><th>Uppgifter</th><th>Åtgärder</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Det finns inga konton än.")}</section>
   <section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>
-  <section class="block"><header><h2>Senaste förfrågningar</h2></header>
-    ${S.data.requests.length ? `<div class="strips">${S.data.requests.slice(0, 30).map((r) => strip(r, { showPilot: true })).join("")}</div>` : empty("Inga förfrågningar än.")}</section>`;
+  <section class="block"><header><h2>Senaste förfrågningar</h2>
+    ${S.data.requests.length ? `<div class="hd-actions"><button class="btn alt sm" data-action="admin-clear-req" data-scope="finished">Ta bort avslutade</button><button class="btn stop sm" data-action="admin-clear-req" data-scope="all">Ta bort alla</button></div>` : ""}</header>
+    ${S.data.requests.length ? `<div class="strips">${S.data.requests.slice(0, 40).map((r) => strip(r, { showPilot: true, actions: adminReqActions(r) })).join("")}</div>` : empty("Inga förfrågningar än.")}</section>
+  ${adminAcars()}`;
 }
 
 /* ---------- Händelser ---------- */
@@ -559,6 +649,11 @@ document.addEventListener("submit", async (e) => {
       await call("requests", { airport: ui.pilot.airport, runway: ui.pilot.runway, type: ui.pilot.type }, "Förfrågan skickad.");
     } else if (f === "duty") {
       await call("profile", { airport: ui.atcAirport }, "Du är på tjänst.");
+    } else if (f === "acars") {
+      await api("messages", { method: "POST", body: { airport: ui.acars.airport, to: ui.acars.to, text: ui.acars.text } });
+      ui.acars.text = "";
+      toast("ACARS skickat.", "ok");
+      await refresh(true);
     }
   } catch (err) {
     toast(err.message, "err");
@@ -589,6 +684,34 @@ document.addEventListener("click", async (e) => {
       await call("requests/" + encodeURIComponent(id) + "/decide", { action: act, note: ui.notes[id] || "" },
         { approve: "Godkänd.", deny: "Nekad.", complete: "Banan är fri." }[act]);
       delete ui.notes[id];
+    }
+    else if (a === "acars-tpl") {
+      ui.acars.text = el.dataset.v; render();
+      const n = $("#at"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    }
+    else if (a === "acars-reply") {
+      ui.acars.to = el.dataset.to; render();
+      const n = $("#at"); if (n) { n.focus(); n.scrollIntoView({ block: "center" }); }
+    }
+    else if (a === "admin-del-req") {
+      if (!confirm("Ta bort förfrågan? Om den har ett pågående tillstånd blir banan ledig.")) return;
+      el.disabled = true;
+      await call("admin/requests/" + encodeURIComponent(el.dataset.id) + "/delete", {}, "Förfrågan är borttagen.");
+    }
+    else if (a === "admin-clear-req") {
+      const all = el.dataset.scope === "all";
+      if (!confirm(all ? "Ta bort ALLA förfrågningar, även pågående tillstånd?" : "Ta bort alla avslutade förfrågningar?")) return;
+      el.disabled = true;
+      await call("admin/requests/clear", { scope: el.dataset.scope }, "Förfrågningarna är borttagna.");
+    }
+    else if (a === "admin-del-msg") {
+      el.disabled = true;
+      await call("admin/messages/" + encodeURIComponent(el.dataset.id) + "/delete", {}, "Meddelandet är borttaget.");
+    }
+    else if (a === "admin-clear-msg") {
+      if (!confirm("Ta bort alla ACARS-meddelanden?")) return;
+      el.disabled = true;
+      await call("admin/messages/clear", {}, "Alla ACARS-meddelanden är borttagna.");
     }
     else if (a === "duty-off") { await call("profile", { airport: null }, "Du är av tjänst."); ui.atcAirport = ""; render(); }
     else if (a === "user-act") {

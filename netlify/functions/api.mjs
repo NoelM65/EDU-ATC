@@ -29,6 +29,8 @@ const PENDING_TTL = 30 * 60 * 1000; // väntande förfrågan går ut efter 30 mi
 const APPROVED_TTL = 60 * 60 * 1000; // godkänt tillstånd avslutas automatiskt efter 60 min
 const HISTORY_TTL = 48 * 3600 * 1000; // historik rensas efter 48 h
 const ACTIVE = ["pending", "approved"];
+const MESSAGE_TTL = 24 * 3600 * 1000; // ACARS-meddelanden rensas efter 24 h
+const ID_RE = /^[a-z0-9]+-[a-f0-9]{8}$/;
 
 const MC_NAME = /^[A-Za-z0-9_]{3,16}$/;
 const FLIGHT_RE = /^[A-Z0-9][A-Z0-9 \-]{1,11}$/;
@@ -276,14 +278,84 @@ function buildAirports(reqs, presence) {
   });
 }
 
+/* ---------------- ACARS ---------------- */
+async function loadMessages(db) {
+  const now = Date.now();
+  const { blobs } = await db.messages.list({ prefix: "m/" });
+  const all = (await Promise.all(blobs.map((b) => db.messages.get(b.key, { type: "json" })))).filter(Boolean);
+  const out = [];
+  for (const m of all) {
+    if (now - m.createdAt > MESSAGE_TTL) {
+      await db.messages.delete("m/" + m.id);
+      continue;
+    }
+    out.push(m);
+  }
+  return out.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function visibleMessages(me, msgs) {
+  if (me.role === "pilot") return msgs.filter((m) => m.from === me.username || m.to === me.username);
+  if (me.role === "atc") return me.airport ? msgs.filter((m) => m.airport === me.airport) : [];
+  return msgs; // admin ser allt
+}
+
+async function sendMessage(req, me, db) {
+  if (me.role !== "pilot" && me.role !== "atc") throw new HttpError(403, "Endast piloter och ATC kan skicka ACARS.");
+  const body = await readBody(req);
+  const text = String(body.text || "").replace(/\s+/g, " ").trim();
+  if (!text) throw bad("Skriv ett meddelande.");
+  if (text.length > 200) throw bad("Meddelandet är för långt (max 200 tecken).");
+
+  const msgs = await loadMessages(db);
+  const now = Date.now();
+  if (msgs.filter((m) => m.from === me.username && now - m.createdAt < 60000).length >= 8)
+    throw new HttpError(429, "Du skickar för snabbt. Vänta en stund och försök igen.");
+
+  let extra;
+  if (me.role === "pilot") {
+    const ap = findAirport(body.airport);
+    if (!ap) throw bad("Välj vilken flygplats meddelandet gäller.");
+    extra = { fromRole: "pilot", flightNumber: me.flightNumber || "", airport: ap.id, to: null, toFlight: "" };
+  } else {
+    if (!me.airport) throw bad("Gå på tjänst vid en flygplats först.");
+    const key = String(body.to || "").toLowerCase();
+    if (!/^[a-z0-9_]{3,16}$/.test(key)) throw bad("Välj vilken pilot meddelandet går till.");
+    const target = await db.users.get(key, { type: "json" });
+    if (!target || target.role !== "pilot" || target.status !== "approved") throw bad("Piloten finns inte.");
+    extra = { fromRole: "atc", flightNumber: "", airport: me.airport, to: target.username, toFlight: target.flightNumber || "" };
+  }
+  const id = now.toString(36) + "-" + crypto.randomBytes(4).toString("hex");
+  const msg = { id, from: me.username, text, createdAt: now, ...extra };
+  await db.messages.setJSON("m/" + id, msg);
+  return json({ message: msg }, 201);
+}
+
 async function state(me, db) {
   await heartbeat(db, me);
-  const [reqs, presence] = await Promise.all([loadRequests(db), loadPresence(db)]);
+  const [reqs, presence, msgs] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db)]);
   let visible = [];
   if (me.role === "pilot") visible = reqs.filter((r) => r.pilot === me.username).slice(0, 25);
   else if (me.role === "atc" && me.airport) visible = reqs.filter((r) => r.airport === me.airport).slice(0, 80);
   else if (me.role === "admin") visible = reqs.slice(0, 100);
-  return json({ me: publicUser(me), airports: buildAirports(reqs, presence), requests: visible, now: Date.now() });
+
+  // Piloter som ATC kan skriva till: de som har förfrågningar eller meddelanden vid flygplatsen
+  let contacts = [];
+  if (me.role === "atc" && me.airport) {
+    const map = new Map();
+    for (const r of reqs) if (r.airport === me.airport) map.set(r.pilot, { username: r.pilot, flightNumber: r.flightNumber });
+    for (const m of msgs) if (m.airport === me.airport && m.fromRole === "pilot") map.set(m.from, { username: m.from, flightNumber: m.flightNumber });
+    contacts = [...map.values()].sort((a, b) => a.username.localeCompare(b.username));
+  }
+
+  return json({
+    me: publicUser(me),
+    airports: buildAirports(reqs, presence),
+    requests: visible,
+    messages: visibleMessages(me, msgs).slice(0, 60),
+    contacts,
+    now: Date.now(),
+  });
 }
 
 async function profile(req, me, db) {
@@ -350,7 +422,7 @@ async function createRequest(req, me, db) {
 }
 
 async function getRequest(db, id) {
-  if (!/^[a-z0-9]+-[a-f0-9]{8}$/.test(id)) throw new HttpError(404, "Förfrågan hittades inte.");
+  if (!ID_RE.test(id)) throw new HttpError(404, "Förfrågan hittades inte.");
   const r = await db.requests.get("r/" + id, { type: "json" });
   if (!r) throw new HttpError(404, "Förfrågan hittades inte.");
   return r;
@@ -432,6 +504,42 @@ async function adminUserAction(req, db, name, action) {
   return json({ user: publicUser(u) });
 }
 
+async function adminDeleteRequest(db, id) {
+  await getRequest(db, id);
+  await db.requests.delete("r/" + id);
+  return json({ ok: true });
+}
+
+async function adminClearRequests(req, db) {
+  const { scope } = await readBody(req);
+  if (scope !== "finished" && scope !== "all") throw bad("Okänd åtgärd.");
+  const { blobs } = await db.requests.list({ prefix: "r/" });
+  let deleted = 0;
+  for (const b of blobs) {
+    const r = await db.requests.get(b.key, { type: "json" });
+    if (!r) continue;
+    if (scope === "all" || !ACTIVE.includes(r.status)) {
+      await db.requests.delete(b.key);
+      deleted++;
+    }
+  }
+  return json({ ok: true, deleted });
+}
+
+async function adminDeleteMessage(db, id) {
+  if (!ID_RE.test(id)) throw new HttpError(404, "Meddelandet hittades inte.");
+  const m = await db.messages.get("m/" + id, { type: "json" });
+  if (!m) throw new HttpError(404, "Meddelandet hittades inte.");
+  await db.messages.delete("m/" + id);
+  return json({ ok: true });
+}
+
+async function adminClearMessages(db) {
+  const { blobs } = await db.messages.list({ prefix: "m/" });
+  for (const b of blobs) await db.messages.delete(b.key);
+  return json({ ok: true, deleted: blobs.length });
+}
+
 /* ------------------------------------------------------------------ */
 /*  Router                                                             */
 /* ------------------------------------------------------------------ */
@@ -463,9 +571,14 @@ async function route(req, db) {
   if (m === "POST" && a === "requests" && !b) return createRequest(req, me, db);
   if (m === "POST" && a === "requests" && b && c === "decide") return decide(req, me, db, b);
   if (m === "POST" && a === "requests" && b && c === "cancel") return cancel(me, db, b);
+  if (m === "POST" && a === "messages" && !b) return sendMessage(req, me, db);
 
   if (a === "admin") {
     if (me.role !== "admin") throw new HttpError(403, "Endast admin.");
+    if (m === "POST" && b === "requests" && c === "clear" && !d) return adminClearRequests(req, db);
+    if (m === "POST" && b === "requests" && c && d === "delete") return adminDeleteRequest(db, c);
+    if (m === "POST" && b === "messages" && c === "clear" && !d) return adminClearMessages(db);
+    if (m === "POST" && b === "messages" && c && d === "delete") return adminDeleteMessage(db, c);
     if (m === "GET" && b === "users" && !c) return adminUsers(db);
     if (m === "POST" && b === "users" && c && d) return adminUserAction(req, db, c, d);
   }
@@ -481,6 +594,7 @@ export function createHandler(getStoreFn) {
         sessions: open("sessions"),
         requests: open("requests"),
         presence: open("presence"),
+        messages: open("messages"),
         throttle: open("throttle"),
       };
       return await route(req, db);

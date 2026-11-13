@@ -42,7 +42,9 @@ Lösenordet ligger som standardvärde i `api.mjs`. Vill du inte ha det i koden, 
 - **Pilot:** registrerar flygnummer och flygbolag, väljer flygplats och bana, och begär att få landa eller lyfta. En aktiv förfrågan åt gången.
 - **ATC:** väljer vilken flygplats hen är på och ser då förfrågningarna dit. Godkänner eller nekar med valfritt meddelande, och markerar när banan är fri igen.
 - **Banor:** en bana kan bara ha ett godkänt tillstånd åt gången. Upptagna banor visas röda för alla.
-- **Städning:** väntande förfrågningar går ut efter 30 minuter, godkända tillstånd avslutas automatiskt efter 60 minuter och historik rensas efter 2 dygn. ATC räknas som på plats så länge sidan är öppen.
+- **ACARS:** piloter och ATC skickar korta textmeddelanden (max 200 tecken) till varandra, med snabbtexter att klicka på. Piloten väljer vilken flygplats meddelandet gäller. ATC svarar en pilot som har skrivit eller gjort en förfrågan vid flygplatsen, till exempel med knappen *Svara*. Nya meddelanden visas som en notis. Man kan skicka högst 8 meddelanden per minut.
+- **Admin:** kan ta bort enskilda förfrågningar, ta bort alla avslutade eller alla förfrågningar, sätta en bana som fri och ta bort ACARS-meddelanden en och en eller alla på en gång. Admin ser hela ACARS-loggen men kan inte skicka meddelanden.
+- **Städning:** väntande förfrågningar går ut efter 30 minuter, godkända tillstånd avslutas automatiskt efter 60 minuter och historik rensas efter 2 dygn. ACARS-meddelanden rensas efter 24 timmar. ATC räknas som på plats så länge sidan är öppen.
 
 ## Flygplatser och banor
 
