@@ -92,6 +92,17 @@ const publicUser = (u) => ({
 
 const findAirport = (id) => AIRPORTS.find((a) => a.id === id);
 
+/* Flygplatsstatus: stängning, stängda banor och information */
+const emptyStatus = () => ({ closed: false, reason: "", closedBy: null, closedAt: null, runways: {}, notices: [] });
+async function getStatus(db, id) {
+  return (await db.airportstatus.get(id, { type: "json" })) || emptyStatus();
+}
+async function loadStatuses(db) {
+  const rows = await Promise.all(AIRPORTS.map((a) => getStatus(db, a.id)));
+  return Object.fromEntries(AIRPORTS.map((a, i) => [a.id, rows[i]]));
+}
+const closedMsg = (what, reason) => `${what} är stängd${reason ? ": " + reason : "."}`;
+
 /* ------------------------------------------------------------------ */
 /*  Inloggning och sessioner                                           */
 /* ------------------------------------------------------------------ */
@@ -250,8 +261,9 @@ async function heartbeat(db, me) {
   }
 }
 
-function buildAirports(reqs, presence) {
+function buildAirports(reqs, presence, statuses) {
   return AIRPORTS.map((a) => {
+    const s = statuses[a.id] || emptyStatus();
     const runwayStatus = Object.fromEntries(a.runways.map((rw) => [rw, null]));
     let pending = 0;
     for (const r of reqs) {
@@ -274,6 +286,11 @@ function buildAirports(reqs, presence) {
       runwayStatus,
       pending,
       atc: presence.filter((p) => p.airport === a.id).map((p) => p.username),
+      closed: !!s.closed,
+      closedReason: s.reason || "",
+      closedBy: s.closedBy || null,
+      runwayClosed: Object.fromEntries(a.runways.map((rw) => [rw, s.runways[rw] || null])),
+      notices: s.notices || [],
     };
   });
 }
@@ -294,9 +311,17 @@ async function loadMessages(db) {
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-function visibleMessages(me, msgs) {
-  if (me.role === "pilot") return msgs.filter((m) => m.from === me.username || m.to === me.username);
-  if (me.role === "atc") return me.airport ? msgs.filter((m) => m.airport === me.airport) : [];
+function visibleMessages(me, msgs, reqs) {
+  if (me.role === "pilot") {
+    // En pilot räknas som "vid" en flygplats om hen har en förfrågan där eller har skrivit till/fått svar därifrån
+    const airports = new Set();
+    for (const r of reqs) if (r.pilot === me.username) airports.add(r.airport);
+    for (const m of msgs) if (m.from === me.username || m.to === me.username) airports.add(m.airport);
+    return msgs.filter(
+      (m) => m.from === me.username || m.to === me.username || m.scope === "all" || (m.scope === "airport" && airports.has(m.airport))
+    );
+  }
+  if (me.role === "atc") return msgs.filter((m) => m.scope === "all" || (me.airport && m.airport === me.airport));
   return msgs; // admin ser allt
 }
 
@@ -316,14 +341,19 @@ async function sendMessage(req, me, db) {
   if (me.role === "pilot") {
     const ap = findAirport(body.airport);
     if (!ap) throw bad("Välj vilken flygplats meddelandet gäller.");
-    extra = { fromRole: "pilot", flightNumber: me.flightNumber || "", airport: ap.id, to: null, toFlight: "" };
+    extra = { fromRole: "pilot", scope: "atc", flightNumber: me.flightNumber || "", airport: ap.id, to: null, toFlight: "" };
   } else {
     if (!me.airport) throw bad("Gå på tjänst vid en flygplats först.");
-    const key = String(body.to || "").toLowerCase();
-    if (!/^[a-z0-9_]{3,16}$/.test(key)) throw bad("Välj vilken pilot meddelandet går till.");
-    const target = await db.users.get(key, { type: "json" });
-    if (!target || target.role !== "pilot" || target.status !== "approved") throw bad("Piloten finns inte.");
-    extra = { fromRole: "atc", flightNumber: "", airport: me.airport, to: target.username, toFlight: target.flightNumber || "" };
+    if (body.to === "@airport" || body.to === "@all") {
+      // Gruppmeddelande: till alla vid flygplatsen eller till alla piloter i hela systemet
+      extra = { fromRole: "atc", scope: body.to === "@all" ? "all" : "airport", flightNumber: "", airport: me.airport, to: null, toFlight: "" };
+    } else {
+      const key = String(body.to || "").toLowerCase();
+      if (!/^[a-z0-9_]{3,16}$/.test(key)) throw bad("Välj vem meddelandet går till.");
+      const target = await db.users.get(key, { type: "json" });
+      if (!target || target.role !== "pilot" || target.status !== "approved") throw bad("Piloten finns inte.");
+      extra = { fromRole: "atc", scope: "pilot", flightNumber: "", airport: me.airport, to: target.username, toFlight: target.flightNumber || "" };
+    }
   }
   const id = now.toString(36) + "-" + crypto.randomBytes(4).toString("hex");
   const msg = { id, from: me.username, text, createdAt: now, ...extra };
@@ -333,7 +363,7 @@ async function sendMessage(req, me, db) {
 
 async function state(me, db) {
   await heartbeat(db, me);
-  const [reqs, presence, msgs] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db)]);
+  const [reqs, presence, msgs, statuses] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db)]);
   let visible = [];
   if (me.role === "pilot") visible = reqs.filter((r) => r.pilot === me.username).slice(0, 25);
   else if (me.role === "atc" && me.airport) visible = reqs.filter((r) => r.airport === me.airport).slice(0, 80);
@@ -350,9 +380,9 @@ async function state(me, db) {
 
   return json({
     me: publicUser(me),
-    airports: buildAirports(reqs, presence),
+    airports: buildAirports(reqs, presence, statuses),
     requests: visible,
-    messages: visibleMessages(me, msgs).slice(0, 60),
+    messages: visibleMessages(me, msgs, reqs).slice(0, 60),
     contacts,
     now: Date.now(),
   });
@@ -396,6 +426,10 @@ async function createRequest(req, me, db) {
   if (!ap.runways.includes(runway)) throw bad("Banan finns inte på den flygplatsen.");
   if (type !== "landing" && type !== "takeoff") throw bad("Välj landning eller start.");
 
+  const st = await getStatus(db, ap.id);
+  if (st.closed) throw new HttpError(409, closedMsg("Flygplatsen", st.reason));
+  if (st.runways[runway]) throw new HttpError(409, closedMsg(`Bana ${runway}`, st.runways[runway].reason));
+
   const reqs = await loadRequests(db);
   if (reqs.some((r) => r.pilot === me.username && ACTIVE.includes(r.status)))
     throw new HttpError(409, "Du har redan en aktiv förfrågan. Avbryt den först.");
@@ -437,6 +471,9 @@ async function decide(req, me, db, id) {
   const now = Date.now();
   if (action === "approve") {
     if (r.status !== "pending") throw new HttpError(409, "Förfrågan är inte längre väntande.");
+    const st = await getStatus(db, r.airport);
+    if (st.closed) throw new HttpError(409, closedMsg("Flygplatsen", st.reason) + " Öppna den innan du godkänner.");
+    if (st.runways[r.runway]) throw new HttpError(409, closedMsg(`Bana ${r.runway}`, st.runways[r.runway].reason) + " Öppna den innan du godkänner.");
     const reqs = await loadRequests(db);
     if (reqs.some((x) => x.id !== r.id && x.airport === r.airport && x.runway === r.runway && x.status === "approved"))
       throw new HttpError(409, `Bana ${r.runway} är upptagen. Avsluta pågående tillstånd först.`);
@@ -502,6 +539,48 @@ async function adminUserAction(req, db, name, action) {
   await db.users.setJSON(key, u);
   if (u.status !== "approved") await db.presence.delete(key);
   return json({ user: publicUser(u) });
+}
+
+/* ---------------- Flygplatsstatus (ATC på plats eller admin) ---------------- */
+async function airportAction(req, me, db, id, action) {
+  const ap = findAirport(id);
+  if (!ap) throw new HttpError(404, "Flygplatsen finns inte.");
+  const allowed = me.role === "admin" || (me.role === "atc" && me.airport === id);
+  if (!allowed) throw new HttpError(403, "Du är inte på tjänst vid den här flygplatsen.");
+
+  const body = await readBody(req);
+  const st = await getStatus(db, id);
+  const clean = (v, max) => String(v || "").replace(/\s+/g, " ").trim().slice(0, max);
+  const now = Date.now();
+
+  if (action === "close") {
+    st.closed = true;
+    st.reason = clean(body.reason, 100);
+    st.closedBy = me.username;
+    st.closedAt = now;
+  } else if (action === "open") {
+    st.closed = false;
+    st.reason = "";
+    st.closedBy = null;
+    st.closedAt = null;
+  } else if (action === "runway") {
+    if (!ap.runways.includes(body.runway)) throw bad("Banan finns inte på den flygplatsen.");
+    if (body.closed) st.runways[body.runway] = { reason: clean(body.reason, 100), by: me.username, at: now };
+    else delete st.runways[body.runway];
+  } else if (action === "notice-add") {
+    const text = clean(body.text, 100);
+    if (!text) throw bad("Skriv en information.");
+    if (st.notices.length >= 10) throw bad("Det finns redan 10 informationsrader. Ta bort någon först.");
+    st.notices.push({ id: now.toString(36) + "-" + crypto.randomBytes(2).toString("hex"), text, by: me.username, createdAt: now });
+  } else if (action === "notice-remove") {
+    const before = st.notices.length;
+    st.notices = st.notices.filter((n) => n.id !== body.id);
+    if (st.notices.length === before) throw new HttpError(404, "Informationen finns inte.");
+  } else {
+    throw bad("Okänd åtgärd.");
+  }
+  await db.airportstatus.setJSON(id, st);
+  return json({ ok: true });
 }
 
 async function adminDeleteRequest(db, id) {
@@ -572,6 +651,7 @@ async function route(req, db) {
   if (m === "POST" && a === "requests" && b && c === "decide") return decide(req, me, db, b);
   if (m === "POST" && a === "requests" && b && c === "cancel") return cancel(me, db, b);
   if (m === "POST" && a === "messages" && !b) return sendMessage(req, me, db);
+  if (m === "POST" && a === "airports" && b && c && !d) return airportAction(req, me, db, b, c);
 
   if (a === "admin") {
     if (me.role !== "admin") throw new HttpError(403, "Endast admin.");
@@ -595,6 +675,7 @@ export function createHandler(getStoreFn) {
         requests: open("requests"),
         presence: open("presence"),
         messages: open("messages"),
+        airportstatus: open("airportstatus"),
         throttle: open("throttle"),
       };
       return await route(req, db);
