@@ -128,6 +128,7 @@ button.rwy:hover{filter:brightness(1.2)}
 .strip{display:grid;grid-template-columns:70px minmax(0,1.6fr) 74px minmax(0,1.2fr) auto;align-items:stretch;background:var(--paper);border:2px solid var(--ink);border-left-width:14px;border-radius:3px}
 .strip>div{padding:9px 12px;border-left:2px dashed #b3b0a3;display:flex;flex-direction:column;justify-content:center;min-width:0}
 .strip>div:first-child{border-left:0}
+.strip.s-inbound{border-left-color:var(--blue)}
 .strip.s-pending{border-left-color:var(--yellow)}
 .strip.s-approved{border-left-color:var(--green)}
 .strip.s-denied{border-left-color:var(--red)}
@@ -237,6 +238,7 @@ const ui = {
   notes: {},
   acars: { airport: "", to: "", text: "" },
   status: { reason: "", notice: "" },
+  enroute: { eta: "" },
   adminAirport: "",
   regDone: false,
 };
@@ -509,6 +511,51 @@ function adminAcars() {
     ${slipList(msgs, { admin: true })}</section>`;
 }
 
+/* --- Flyg på väg / ankommande flyg --- */
+function etaText(eta, now) {
+  if (!eta) return "Ankomsttid okänd";
+  const m = Math.round((eta - now) / 60000);
+  return m > 0 ? "Om cirka " + m + " min (kl " + clock(eta) + ")" : "Beräknad ankomst har passerat (kl " + clock(eta) + ")";
+}
+
+function pilotFlight() {
+  const me = S.me, d = S.data, f = d.myFlight;
+  const ready = !!(me.flightNumber && me.airline);
+  const destAp = d.airports.find((a) => a.name.toLowerCase() === (me.destination || "").trim().toLowerCase());
+  if (f) {
+    return `<section class="block"><div class="panel hl"><h2>Du är på väg till ${esc(f.destination)}</h2>
+      <p class="lead">${etaText(f.eta, d.now)}. ATC vid flygplatsen ser dig som ankommande flyg. Flyget avslutas när du har landat eller efter 3 timmar.</p>
+      <button class="btn" data-action="enroute-off">Jag har landat</button></div></section>`;
+  }
+  return `<section class="block"><div class="panel"><h2>Flyg på väg</h2>
+    <p class="lead">${destAp ? "Låt ATC vid " + esc(destAp.name) + " se att du är på väg." : "Välj en av flygplatserna som destination under Ditt flyg och spara, så kan du anmäla att du är på väg dit."}</p>
+    <form data-form="enroute"><div class="row">
+      <div style="flex:1;min-width:220px"><label class="f" for="eta">Minuter kvar till ankomst (valfritt)</label>
+        <input id="eta" type="text" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="till exempel 15" data-bind="enroute.eta" value="${esc(ui.enroute.eta)}"></div>
+      <button class="btn" type="submit" style="align-self:flex-end" ${destAp && ready ? "" : "disabled"}>Jag är på väg</button>
+    </div></form></div></section>`;
+}
+
+function inboundStrip(f, { admin = false } = {}) {
+  const q = f.request;
+  const apName = (airportById(f.airport) || {}).name || f.destination;
+  return `<article class="strip s-inbound">
+    <div class="t">${f.eta ? clock(f.eta) : "–"}<small>${f.eta ? "ankomst" : "okänd tid"}</small></div>
+    <div><div class="fl">${esc(f.flightNumber)}<span>${esc(f.airline)}</span></div>
+      <div class="sub">${esc(f.username)}${admin ? " → " + esc(apName) : ""}</div></div>
+    <div class="rw"><b>${q ? esc(q.runway) : "–"}</b><small>bana</small></div>
+    <div>${q ? `<span class="status ${q.status}">${STATUS[q.status]} · ${TYPE[q.type]}</span>` : `<span class="status cancelled">Ingen förfrågan än</span>`}
+      <div class="sub" style="margin-top:4px">${esc(etaText(f.eta, S.data.now))}</div></div>
+    ${admin ? "" : `<div class="act"><button class="btn alt sm" data-action="acars-reply" data-to="${esc(f.username)}">Skriv ACARS</button></div>`}
+  </article>`;
+}
+
+function inboundSection({ admin = false } = {}) {
+  const list = S.data.inbound || [];
+  return `<section class="block"><header><h2>${admin ? "Flyg på väg" : "Ankommande flyg"}</h2><p>${admin ? "Alla flyg som är anmälda på väg till en flygplats." : "Piloter som har anmält att de är på väg till din flygplats. Närmast först."}</p></header>
+    ${list.length ? `<div class="strips">${list.map((f) => inboundStrip(f, { admin })).join("")}</div>` : empty(admin ? "Inga flyg är anmälda på väg just nu." : "Inga flyg är anmälda på väg hit just nu. Piloter anmäler det under Flyg på väg när de har valt din flygplats som destination.")}</section>`;
+}
+
 /* --- Flygplatsstatus (ATC på plats och admin) --- */
 function statusPanel(a, { picker = false } = {}) {
   const rwBtns = a.runways.map((rw) => {
@@ -589,7 +636,7 @@ function pilotView() {
         <div class="field"><label class="f" for="al">Flygbolag</label>
           <input id="al" type="text" maxlength="40" placeholder="till exempel EDU Airways" data-bind="profile.airline" value="${esc(ui.profile.airline)}" required></div>
         <div class="field"><label class="f" for="de">Destination (valfri)</label>
-          <input id="de" type="text" maxlength="40" list="dest-list" autocomplete="off" placeholder="Välj en flygplats eller skriv egen" data-bind="profile.destination" value="${esc(ui.profile.destination)}">
+          <input id="de" type="text" maxlength="60" list="dest-list" autocomplete="off" placeholder="Välj en flygplats eller skriv egen" data-bind="profile.destination" value="${esc(ui.profile.destination)}">
           <datalist id="dest-list">${d.airports.map((a) => `<option value="${esc(a.name)}"></option>`).join("")}</datalist>
           <small>Syns för ATC på dina förfrågningar. Ändra den när du ska åt ett nytt håll och spara igen.</small></div>
         <button class="btn" type="submit">Spara flyg</button>
@@ -616,6 +663,7 @@ function pilotView() {
       </form>
     </div>
   </div></section>
+  ${pilotFlight()}
   ${pilotAcars()}
   <section class="block"><header><h2>Flygplatser just nu</h2><p>Röda banor har pågående tillstånd.</p></header>${airportGrid(ui.pilot.airport)}</section>
   <section class="block"><header><h2>Dina tidigare förfrågningar</h2></header>
@@ -649,6 +697,7 @@ function atcView() {
   return `${duty}
   <section class="block"><header><h2>Banor vid ${esc(myAp.name)}</h2></header>
     <div class="aps">${airportCard(myAp, false)}</div></section>
+  ${inboundSection()}
   ${statusPanel(myAp)}
   <section class="block"><header><h2>Väntande förfrågningar</h2><p>Äldst först.</p></header>
     ${pending.length ? `<div class="strips">${pending.map((r) => strip(r, { showPilot: true, actions: pendingActions(r) })).join("")}</div>` : empty("Inga väntande förfrågningar just nu.")}</section>
@@ -685,6 +734,7 @@ function adminView() {
   <section class="block"><header><h2>Alla konton</h2></header>
     ${users.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Användare</th><th>Typ</th><th>Status</th><th>Uppgifter</th><th>Åtgärder</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Det finns inga konton än.")}</section>
   ${adminStatus()}
+  ${inboundSection({ admin: true })}
   <section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>
   <section class="block"><header><h2>Senaste förfrågningar</h2>
     ${S.data.requests.length ? `<div class="hd-actions"><button class="btn alt sm" data-action="admin-clear-req" data-scope="finished">Ta bort avslutade</button><button class="btn stop sm" data-action="admin-clear-req" data-scope="all">Ta bort alla</button></div>` : ""}</header>
@@ -743,6 +793,11 @@ document.addEventListener("submit", async (e) => {
       ui.acars.text = "";
       toast("ACARS skickat.", "ok");
       await refresh(true);
+    } else if (f === "enroute") {
+      await api("enroute", { method: "POST", body: { active: true, etaMinutes: ui.enroute.eta } });
+      ui.enroute.eta = "";
+      toast("Du är anmäld som på väg.", "ok");
+      await refresh(true);
     } else if (f === "notice") {
       await api("airports/" + encodeURIComponent(e.target.dataset.ap) + "/notice-add", { method: "POST", body: { text: ui.status.notice } });
       ui.status.notice = "";
@@ -778,6 +833,10 @@ document.addEventListener("click", async (e) => {
       await call("requests/" + encodeURIComponent(id) + "/decide", { action: act, note: ui.notes[id] || "" },
         { approve: "Godkänd.", deny: "Nekad.", complete: "Banan är fri." }[act]);
       delete ui.notes[id];
+    }
+    else if (a === "enroute-off") {
+      el.disabled = true;
+      await call("enroute", { active: false }, "Flygningen är avslutad.");
     }
     else if (a === "acars-tpl") {
       ui.acars.text = el.dataset.v; render();

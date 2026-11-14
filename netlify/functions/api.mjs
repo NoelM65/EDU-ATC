@@ -30,11 +30,13 @@ const APPROVED_TTL = 60 * 60 * 1000; // godkänt tillstånd avslutas automatiskt
 const HISTORY_TTL = 48 * 3600 * 1000; // historik rensas efter 48 h
 const ACTIVE = ["pending", "approved"];
 const MESSAGE_TTL = 24 * 3600 * 1000; // ACARS-meddelanden rensas efter 24 h
+const ENROUTE_TTL = 3 * 3600 * 1000; // "på väg" avslutas automatiskt efter 3 h
 const ID_RE = /^[a-z0-9]+-[a-f0-9]{8}$/;
 
 const MC_NAME = /^[A-Za-z0-9_]{3,16}$/;
 const FLIGHT_RE = /^[A-Z0-9][A-Z0-9 \-]{1,11}$/;
 const AIRLINE_RE = /^[\p{L}\p{N}][\p{L}\p{N} .&'\-]{1,39}$/u;
+const DEST_RE = /^[\p{L}\p{N}][\p{L}\p{N} .&'\-]{1,59}$/u; // längre än flygbolag: flygplatsnamnen är upp till 42 tecken
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -313,11 +315,59 @@ async function loadMessages(db) {
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-function visibleMessages(me, msgs, reqs) {
+/* ---------------- Flyg på väg (ankommande flyg) ---------------- */
+const resolveAirport = (text) => {
+  const t = String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  return t ? AIRPORTS.find((a) => a.id === t || a.name.toLowerCase() === t) || null : null;
+};
+
+async function loadEnroute(db) {
+  const now = Date.now();
+  const { blobs } = await db.enroute.list();
+  const rows = [];
+  for (const b of blobs) {
+    const f = await db.enroute.get(b.key, { type: "json" });
+    if (!f) continue;
+    if (now - f.since > ENROUTE_TTL) {
+      await db.enroute.delete(b.key);
+      continue;
+    }
+    rows.push(f);
+  }
+  // Närmast ankomst först, flyg utan ETA sist
+  return rows.sort((a, b) => (a.eta ?? Infinity) - (b.eta ?? Infinity) || a.since - b.since);
+}
+
+async function setEnroute(req, me, db) {
+  if (me.role !== "pilot") throw new HttpError(403, "Endast piloter kan anmäla att de är på väg.");
+  const { active, etaMinutes } = await readBody(req);
+  const key = me.username.toLowerCase();
+  if (!active) {
+    await db.enroute.delete(key);
+    return json({ ok: true });
+  }
+  if (!me.flightNumber || !me.airline) throw bad("Registrera flygnummer och flygbolag först.");
+  const ap = resolveAirport(me.destination);
+  if (!ap) throw bad("Välj en av flygplatserna som destination under Ditt flyg och spara, så kan ATC se att du är på väg dit.");
+
+  const now = Date.now();
+  let eta = null;
+  if (etaMinutes !== undefined && etaMinutes !== null && String(etaMinutes).trim() !== "") {
+    const n = Number(String(etaMinutes).trim().replace(",", "."));
+    if (!Number.isFinite(n) || n < 1 || n > 180) throw bad("Beräknad ankomst ska vara mellan 1 och 180 minuter.");
+    eta = now + Math.round(n * 60000);
+  }
+  const f = { username: me.username, flightNumber: me.flightNumber, airline: me.airline, destination: ap.name, airport: ap.id, since: now, eta };
+  await db.enroute.setJSON(key, f);
+  return json({ flight: f }, 201);
+}
+
+function visibleMessages(me, msgs, reqs, enroute = []) {
   if (me.role === "pilot") {
-    // En pilot räknas som "vid" en flygplats om hen har en förfrågan där eller har skrivit till/fått svar därifrån
+    // En pilot räknas som "vid" en flygplats om hen har en förfrågan där, är på väg dit eller har skrivit till/fått svar därifrån
     const airports = new Set();
     for (const r of reqs) if (r.pilot === me.username) airports.add(r.airport);
+    for (const f of enroute) if (f.username === me.username) airports.add(f.airport);
     for (const m of msgs) if (m.from === me.username || m.to === me.username) airports.add(m.airport);
     return msgs.filter(
       (m) => m.from === me.username || m.to === me.username || m.scope === "all" || (m.scope === "airport" && airports.has(m.airport))
@@ -365,7 +415,7 @@ async function sendMessage(req, me, db) {
 
 async function state(me, db) {
   await heartbeat(db, me);
-  const [reqs, presence, msgs, statuses] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db)]);
+  const [reqs, presence, msgs, statuses, enroute] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db), loadEnroute(db)]);
   let visible = [];
   if (me.role === "pilot") visible = reqs.filter((r) => r.pilot === me.username).slice(0, 25);
   else if (me.role === "atc" && me.airport) visible = reqs.filter((r) => r.airport === me.airport).slice(0, 80);
@@ -377,15 +427,29 @@ async function state(me, db) {
     const map = new Map();
     for (const r of reqs) if (r.airport === me.airport) map.set(r.pilot, { username: r.pilot, flightNumber: r.flightNumber });
     for (const m of msgs) if (m.airport === me.airport && m.fromRole === "pilot") map.set(m.from, { username: m.from, flightNumber: m.flightNumber });
+    for (const f of enroute) if (f.airport === me.airport) map.set(f.username, { username: f.username, flightNumber: f.flightNumber });
     contacts = [...map.values()].sort((a, b) => a.username.localeCompare(b.username));
   }
+
+  // Ankommande flyg: ATC ser flyg på väg till sin flygplats, admin ser alla, piloten ser sitt eget
+  let inbound = [];
+  let myFlight = null;
+  const withRequest = (f) => {
+    const q = reqs.find((r) => r.pilot === f.username && r.airport === f.airport && ACTIVE.includes(r.status));
+    return { ...f, request: q ? { status: q.status, type: q.type, runway: q.runway } : null };
+  };
+  if (me.role === "atc" && me.airport) inbound = enroute.filter((f) => f.airport === me.airport).map(withRequest);
+  else if (me.role === "admin") inbound = enroute.map(withRequest);
+  else if (me.role === "pilot") myFlight = enroute.find((f) => f.username === me.username) || null;
 
   return json({
     me: publicUser(me),
     airports: buildAirports(reqs, presence, statuses),
     requests: visible,
-    messages: visibleMessages(me, msgs, reqs).slice(0, 60),
+    messages: visibleMessages(me, msgs, reqs, enroute).slice(0, 60),
     contacts,
+    inbound,
+    myFlight,
     now: Date.now(),
   });
 }
@@ -402,7 +466,9 @@ async function profile(req, me, db) {
     if (!FLIGHT_RE.test(flightNumber)) throw bad("Ogiltigt flygnummer (2–12 tecken: A–Z, 0–9, mellanslag eller bindestreck).");
     if (!AIRLINE_RE.test(airline)) throw bad("Ogiltigt flygbolag (2–40 tecken).");
     const destination = String(body.destination || "").replace(/\s+/g, " ").trim();
-    if (destination && !AIRLINE_RE.test(destination)) throw bad("Ogiltig destination (2–40 tecken).");
+    if (destination && !DEST_RE.test(destination)) throw bad("Ogiltig destination (2–60 tecken).");
+    // Ändrad destination eller ändrat flygnummer gör att en pågående anmälan inte stämmer längre
+    if (destination !== (u.destination || "") || flightNumber !== (u.flightNumber || "")) await db.enroute.delete(key);
     u.flightNumber = flightNumber;
     u.airline = airline;
     u.destination = destination;
@@ -491,6 +557,11 @@ async function decide(req, me, db, id) {
   } else if (action === "complete") {
     if (r.status !== "approved") throw new HttpError(409, "Endast godkända tillstånd kan avslutas.");
     r.status = "completed";
+    // En genomförd landning avslutar pilotens "på väg" till den flygplatsen
+    if (r.type === "landing") {
+      const f = await db.enroute.get(r.pilot.toLowerCase(), { type: "json" });
+      if (f && f.airport === r.airport) await db.enroute.delete(r.pilot.toLowerCase());
+    }
   } else {
     throw bad("Okänd åtgärd.");
   }
@@ -533,6 +604,7 @@ async function adminUserAction(req, db, name, action) {
   else if (action === "delete") {
     await db.users.delete(key);
     await db.presence.delete(key);
+    await db.enroute.delete(key);
     return json({ ok: true });
   } else if (action === "password") {
     const { password } = await readBody(req);
@@ -543,7 +615,10 @@ async function adminUserAction(req, db, name, action) {
   } else throw bad("Okänd åtgärd.");
 
   await db.users.setJSON(key, u);
-  if (u.status !== "approved") await db.presence.delete(key);
+  if (u.status !== "approved") {
+    await db.presence.delete(key);
+    await db.enroute.delete(key);
+  }
   return json({ user: publicUser(u) });
 }
 
@@ -657,6 +732,7 @@ async function route(req, db) {
   if (m === "POST" && a === "requests" && b && c === "decide") return decide(req, me, db, b);
   if (m === "POST" && a === "requests" && b && c === "cancel") return cancel(me, db, b);
   if (m === "POST" && a === "messages" && !b) return sendMessage(req, me, db);
+  if (m === "POST" && a === "enroute" && !b) return setEnroute(req, me, db);
   if (m === "POST" && a === "airports" && b && c && !d) return airportAction(req, me, db, b, c);
 
   if (a === "admin") {
@@ -681,6 +757,7 @@ export function createHandler(getStoreFn) {
         requests: open("requests"),
         presence: open("presence"),
         messages: open("messages"),
+        enroute: open("enroute"),
         airportstatus: open("airportstatus"),
         throttle: open("throttle"),
       };
