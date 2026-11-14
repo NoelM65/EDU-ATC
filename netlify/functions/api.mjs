@@ -86,6 +86,7 @@ const publicUser = (u) => ({
   status: u.status,
   flightNumber: u.flightNumber || "",
   airline: u.airline || "",
+  destination: u.destination || "",
   airport: u.airport || null,
   createdAt: u.createdAt || null,
 });
@@ -273,6 +274,7 @@ function buildAirports(reqs, presence, statuses) {
           requestId: r.id,
           flightNumber: r.flightNumber,
           airline: r.airline,
+          destination: r.destination || "",
           type: r.type,
           pilot: r.pilot,
           since: r.approvedAt,
@@ -399,8 +401,11 @@ async function profile(req, me, db) {
     const airline = String(body.airline || "").trim();
     if (!FLIGHT_RE.test(flightNumber)) throw bad("Ogiltigt flygnummer (2–12 tecken: A–Z, 0–9, mellanslag eller bindestreck).");
     if (!AIRLINE_RE.test(airline)) throw bad("Ogiltigt flygbolag (2–40 tecken).");
+    const destination = String(body.destination || "").replace(/\s+/g, " ").trim();
+    if (destination && !AIRLINE_RE.test(destination)) throw bad("Ogiltig destination (2–40 tecken).");
     u.flightNumber = flightNumber;
     u.airline = airline;
+    u.destination = destination;
     await db.users.setJSON(key, u);
     return json({ me: publicUser(u) });
   }
@@ -441,6 +446,7 @@ async function createRequest(req, me, db) {
     pilot: me.username,
     flightNumber: me.flightNumber,
     airline: me.airline,
+    destination: me.destination || "",
     airport: ap.id,
     runway,
     type,

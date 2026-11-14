@@ -39,7 +39,7 @@ Lösenordet ligger som standardvärde i `api.mjs`. Vill du inte ha det i koden, 
 ## Så fungerar det
 
 - **Konton:** inloggning med Minecraft-användarnamn och lösenord. Nya konton (pilot eller ATC) väntar på godkännande av admin. Admin kan också neka, spärra, byta lösenord och ta bort konton.
-- **Pilot:** registrerar flygnummer och flygbolag, väljer flygplats och bana, och begär att få landa eller lyfta. En aktiv förfrågan åt gången.
+- **Pilot:** registrerar flygnummer och flygbolag (och en valfri destination), väljer flygplats och bana, och begär att få landa eller lyfta. Destinationen kopieras till varje ny förfrågan och syns för ATC och admin. Ändrar du den senare påverkas bara nästa förfrågan. En aktiv förfrågan åt gången.
 - **ATC:** väljer vilken flygplats hen är på och ser då förfrågningarna dit. Godkänner eller nekar med valfritt meddelande, och markerar när banan är fri igen.
 - **Banor:** en bana kan bara ha ett godkänt tillstånd åt gången. Upptagna banor visas röda för alla.
 - **ACARS:** piloter och ATC skickar korta textmeddelanden (max 200 tecken) till varandra, med snabbtexter att klicka på. Piloten väljer vilken flygplats meddelandet gäller. ATC svarar en pilot som har skrivit eller gjort en förfrågan vid flygplatsen, till exempel med knappen *Svara*. Nya meddelanden visas som en notis. Man kan skicka högst 8 meddelanden per minut.

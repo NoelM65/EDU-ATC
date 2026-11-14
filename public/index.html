@@ -198,7 +198,7 @@ button.rwy.tg:hover{filter:brightness(1.25)}
 .slip .sa{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
 
 /* Toasts */
-#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(380px,calc(100vw - 32px))}
+#toasts{position:fixed;left:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(380px,calc(100vw - 32px))}
 .toast{background:var(--ink);color:#fff;border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px;font-weight:500;box-shadow:0 6px 20px #0004}
 .toast.ok{border-color:var(--green)}
 .toast.err{border-color:var(--red)}
@@ -230,7 +230,7 @@ const ui = {
   tab: "login",
   login: { username: "", password: "" },
   reg: { username: "", password: "", password2: "", role: "pilot" },
-  profile: { flightNumber: "", airline: "" },
+  profile: { flightNumber: "", airline: "", destination: "" },
   profileInit: false,
   pilot: { airport: "", runway: "", type: "landing" },
   atcAirport: "",
@@ -314,7 +314,7 @@ async function refresh(force) {
       S.knownMsgs = new Set(msgs.map((m) => m.id));
     }
     if (!ui.profileInit) {
-      ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "" };
+      ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "", destination: S.me.destination || "" };
       ui.atcAirport = S.me.airport || "";
       ui.profileInit = true;
     }
@@ -431,7 +431,8 @@ function strip(r, { actions = "", showPilot = false } = {}) {
   return `<article class="strip s-${r.status}">
     <div class="t">${clock(r.createdAt)}<small>${dayLabel(r.createdAt)}</small></div>
     <div><div class="fl">${esc(r.flightNumber)}<span>${esc(r.airline)}</span></div>
-      <div class="sub">${showPilot ? esc(r.pilot) + " · " : ""}${esc(ap ? ap.name : r.airport)}</div></div>
+      <div class="sub">${showPilot ? esc(r.pilot) + " · " : ""}${esc(ap ? ap.name : r.airport)}</div>
+      ${r.destination ? `<div class="sub">Destination: <b>${esc(r.destination)}</b></div>` : ""}</div>
     <div class="rw"><b>${esc(r.runway)}</b><small>bana</small></div>
     <div><span class="status ${r.status}">${STATUS[r.status]} · ${TYPE[r.type]}</span>
       ${r.note ? `<div class="note">”${esc(r.note)}”${r.decidedBy ? " – " + esc(r.decidedBy) : ""}</div>` : ""}</div>
@@ -587,6 +588,10 @@ function pilotView() {
           <input id="fn" type="text" maxlength="12" autocapitalize="characters" placeholder="till exempel EDU101" data-bind="profile.flightNumber" value="${esc(ui.profile.flightNumber)}" required></div>
         <div class="field"><label class="f" for="al">Flygbolag</label>
           <input id="al" type="text" maxlength="40" placeholder="till exempel EDU Airways" data-bind="profile.airline" value="${esc(ui.profile.airline)}" required></div>
+        <div class="field"><label class="f" for="de">Destination (valfri)</label>
+          <input id="de" type="text" maxlength="40" list="dest-list" autocomplete="off" placeholder="Välj en flygplats eller skriv egen" data-bind="profile.destination" value="${esc(ui.profile.destination)}">
+          <datalist id="dest-list">${d.airports.map((a) => `<option value="${esc(a.name)}"></option>`).join("")}</datalist>
+          <small>Syns för ATC på dina förfrågningar. Ändra den när du ska åt ett nytt håll och spara igen.</small></div>
         <button class="btn" type="submit">Spara flyg</button>
       </form>
     </div>
@@ -661,7 +666,7 @@ function adminView() {
   const pend = users.filter((u) => u.status === "pending");
   const stLabel = { pending: "Väntar", approved: "Godkänd", rejected: "Nekad" };
   const stClass = { pending: "pending", approved: "approved", rejected: "denied" };
-  const detail = (u) => (u.role === "pilot" ? (u.flightNumber ? esc(u.flightNumber) + " · " + esc(u.airline) : "Inget flyg registrerat") : u.airport ? esc((airportById(u.airport) || {}).name || u.airport) : "Ingen flygplats vald");
+  const detail = (u) => (u.role === "pilot" ? (u.flightNumber ? esc(u.flightNumber) + " · " + esc(u.airline) + (u.destination ? " → " + esc(u.destination) : "") : "Inget flyg registrerat") : u.airport ? esc((airportById(u.airport) || {}).name || u.airport) : "Ingen flygplats vald");
   const btn = (u, act, label, cls) => `<button class="btn ${cls} sm" data-action="user-act" data-name="${esc(u.username)}" data-act="${act}">${label}</button>`;
 
   const pendCards = pend.length
@@ -726,7 +731,7 @@ document.addEventListener("submit", async (e) => {
       ui.reg = { username: "", password: "", password2: "", role: "pilot" };
       ui.regDone = true; ui.tab = "login"; render();
     } else if (f === "profile") {
-      await call("profile", { flightNumber: ui.profile.flightNumber, airline: ui.profile.airline }, "Flyget är sparat.");
+      await call("profile", { flightNumber: ui.profile.flightNumber, airline: ui.profile.airline, destination: ui.profile.destination }, "Flyget är sparat.");
       ui.profileInit = false; await refresh(true);
     } else if (f === "request") {
       await call("requests", { airport: ui.pilot.airport, runway: ui.pilot.runway, type: ui.pilot.type }, "Förfrågan skickad.");
