@@ -27,7 +27,7 @@
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--apron);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45}
-button,input,select{font:inherit;color:inherit}
+button,input,select,textarea{font:inherit;color:inherit}
 h1,h2,h3{font-family:var(--display);margin:0;line-height:1.05;letter-spacing:.005em}
 h2{font-size:1.65rem;font-weight:900}
 h3{font-size:1.2rem;font-weight:700}
@@ -72,7 +72,8 @@ section.block>header p{color:var(--ink-2)}
 label.f{display:block;font-weight:700;margin-bottom:4px}
 .field{margin-bottom:14px}
 .field small{display:block;color:var(--ink-2);margin-top:3px}
-input[type=text],input[type=password],select{width:100%;background:#fff;border:2px solid var(--ink);border-radius:4px;padding:9px 11px;min-height:44px}
+input[type=text],input[type=password],select,textarea{width:100%;background:#fff;border:2px solid var(--ink);border-radius:4px;padding:9px 11px;min-height:44px}
+textarea{min-height:92px;resize:vertical;line-height:1.4}
 input::placeholder{color:#8b929c}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 
@@ -115,10 +116,10 @@ button.rwy:hover{filter:brightness(1.2)}
 .ap{background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
 .ap header{display:flex;flex-direction:column;gap:6px}
 .ap h3{font-size:1.25rem}
-.atc{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:.92rem}
-.atc i{width:11px;height:11px;border-radius:50%;background:var(--grey);display:inline-block}
-.atc.on i{background:var(--green);box-shadow:0 0 0 3px #1f9d6b33}
-.atc.off{color:var(--ink-2);font-weight:500}
+.ap .atc{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:.92rem}
+.ap .atc i{width:11px;height:11px;border-radius:50%;background:var(--grey);display:inline-block}
+.ap .atc.on i{background:var(--green);box-shadow:0 0 0 3px #1f9d6b33}
+.ap .atc.off{color:var(--ink-2);font-weight:500}
 .ap .rwys{display:flex;gap:8px;flex-wrap:wrap}
 .ap footer{color:var(--ink-2);font-size:.93rem}
 .ap.mine{box-shadow:0 0 0 4px var(--yellow)}
@@ -168,6 +169,40 @@ button.rwy:hover{filter:brightness(1.2)}
 .tbl .acts{display:flex;gap:6px;flex-wrap:wrap}
 .scroll{overflow-x:auto}
 .pillrole{font-family:var(--display);font-weight:700;border:2px solid var(--ink);border-radius:3px;padding:0 7px}
+
+/* Knappar i den mörka toppraden */
+.btn.onbar{color:var(--paper);border-color:var(--paper)}
+.btn.onbar:hover:not(:disabled){background:#3a414c}
+.btn.onbar.on,.btn.onbar.on:hover:not(:disabled){background:var(--yellow);color:var(--ink);border-color:var(--yellow)}
+
+/* Välkomstpanel och information på startsidan */
+.home h3{margin:16px 0 8px}
+.ann-list{display:flex;flex-direction:column;gap:10px}
+.ann{background:var(--paper-2);border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px}
+.ann.admin{border-left-color:var(--yellow);background:#fff3c4}
+.ann .hd{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;color:var(--ink-2);font-size:.9rem;margin-bottom:4px}
+.ann .hd b{color:var(--ink)}
+.ann .tx{overflow-wrap:anywhere}
+.ann .sa{margin-top:8px}
+
+/* Aktivitet (admin) */
+.act-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media(max-width:820px){.act-grid{grid-template-columns:1fr}}
+.act-col>h3{margin-bottom:8px}
+.act-scroll{display:flex;flex-direction:column;gap:8px;max-height:560px;overflow:auto;padding:2px}
+.person{background:var(--paper);border:2px solid var(--ink);border-radius:4px;padding:9px 12px}
+.person.off{background:var(--paper-2);border-color:#9a9788}
+.person .ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.person .seen{margin-left:auto;color:var(--ink-2);font-size:.88rem}
+.person .pd{margin-top:3px;color:var(--ink-2);overflow-wrap:anywhere}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--grey);display:inline-block;flex:none}
+.dot.on{background:var(--green);box-shadow:0 0 0 3px #1f9d6b33}
+.events{list-style:none;margin:0;padding:2px;display:flex;flex-direction:column;gap:6px;max-height:560px;overflow:auto}
+.ev{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;background:var(--paper);border:1px solid #bdb9a8;border-left:6px solid var(--blue);padding:6px 10px;border-radius:3px}
+.ev.atc{border-left-color:var(--yellow)}
+.ev.admin{border-left-color:var(--ink)}
+.ev .et{color:var(--ink-2);font-size:.85rem}
+.ev .tx{overflow-wrap:anywhere}
 
 /* Stängda flygplatser och banor, information */
 .ap.closed{border-color:var(--red);background:#fbefee}
@@ -226,7 +261,7 @@ const ROLE = { pilot: "Pilot", atc: "ATC", admin: "Admin" };
 const POLL_MS = 8000;
 
 /* ---------- Tillstånd ---------- */
-const S = { token: null, me: null, data: null, users: null, sig: "", offline: false, booting: true, knownMsgs: null };
+const S = { token: null, me: null, data: null, users: null, activity: null, sig: "", offline: false, booting: true, knownMsgs: null, knownAnns: null };
 const ui = {
   tab: "login",
   login: { username: "", password: "" },
@@ -240,6 +275,9 @@ const ui = {
   status: { reason: "", notice: "" },
   enroute: { eta: "" },
   adminAirport: "",
+  ann: { audience: "", text: "" },
+  activityOpen: false,
+  activityFilter: "all",
   regDone: false,
 };
 try { S.token = localStorage.getItem("edu_token"); } catch (e) {}
@@ -289,8 +327,10 @@ function toast(msg, kind = "info") {
 }
 
 function forceLogout(msg) {
-  S.token = null; S.me = null; S.data = null; S.users = null; S.sig = ""; S.knownMsgs = null; ui.profileInit = false;
+  S.token = null; S.me = null; S.data = null; S.users = null; S.activity = null; S.sig = ""; S.knownMsgs = null; S.knownAnns = null; ui.profileInit = false;
   ui.acars = { airport: "", to: "", text: "" };
+  ui.ann = { audience: "", text: "" };
+  ui.activityOpen = false;
   try { localStorage.removeItem("edu_token"); } catch (e) {}
   stopPolling();
   if (msg) toast(msg, "err");
@@ -301,10 +341,16 @@ function forceLogout(msg) {
 async function refresh(force) {
   if (!S.token) return;
   try {
-    const [data, users] = await Promise.all([api("state"), S.me && S.me.role === "admin" ? api("admin/users") : Promise.resolve(null)]);
+    const isAdmin = !!(S.me && S.me.role === "admin");
+    const [data, users, act] = await Promise.all([
+      api("state"),
+      isAdmin ? api("admin/users") : Promise.resolve(null),
+      isAdmin && ui.activityOpen ? api("admin/activity") : Promise.resolve(null),
+    ]);
     S.offline = false;
     S.me = data.me;
     S.users = users ? users.users : null;
+    S.activity = act;
     if (S.me.role !== "admin") {
       const msgs = data.messages || [];
       if (S.knownMsgs) {
@@ -314,13 +360,22 @@ async function refresh(force) {
         }
       }
       S.knownMsgs = new Set(msgs.map((m) => m.id));
+
+      const anns = data.announcements || [];
+      if (S.knownAnns) {
+        for (const n of anns) {
+          if (n.from !== S.me.username && !S.knownAnns.has(n.id))
+            toast("Ny information från " + (n.fromRole === "admin" ? "admin" : "ATC " + n.from) + ": " + n.text, "info");
+        }
+      }
+      S.knownAnns = new Set(anns.map((n) => n.id));
     }
     if (!ui.profileInit) {
       ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "", destination: S.me.destination || "" };
       ui.atcAirport = S.me.airport || "";
       ui.profileInit = true;
     }
-    const sig = JSON.stringify([data, users, S.offline]);
+    const sig = JSON.stringify([data, users, act, S.offline]);
     if (sig !== S.sig || force) { S.sig = sig; S.data = data; render(); }
   } catch (e) {
     if (e.network && !S.offline) { S.offline = true; S.sig = ""; render(); }
@@ -363,7 +418,9 @@ function shell(body, loggedIn) {
   return `<div class="bar"><div class="bar-in">
     <div class="brand">${logo}<div><b>EDU Flygledning</b><small>Landnings- och starttillstånd på EDU</small></div></div>
     ${S.offline ? `<span class="offline">Ingen anslutning</span>` : ""}
-    ${loggedIn ? `<div class="who"><span>${esc(S.me.username)}</span><span class="role">${ROLE[S.me.role]}</span><button class="btn alt sm" style="color:#f7f5ee;border-color:#f7f5ee" data-action="logout">Logga ut</button></div>` : ""}
+    ${loggedIn ? `<div class="who"><span>${esc(S.me.username)}</span><span class="role">${ROLE[S.me.role]}</span>
+      ${S.me.role === "admin" ? `<button class="btn alt sm onbar ${ui.activityOpen ? "on" : ""}" data-action="activity-toggle" aria-pressed="${ui.activityOpen}">${ui.activityOpen ? "Dölj aktivitet" : "Se Aktivitet"}</button>` : ""}
+      <button class="btn alt sm onbar" data-action="logout">Logga ut</button></div>` : ""}
   </div></div><main>${body}</main>`;
 }
 
@@ -511,6 +568,88 @@ function adminAcars() {
     ${slipList(msgs, { admin: true })}</section>`;
 }
 
+/* --- Välkommen och information på startsidan --- */
+const AUDIENCE = { all: "alla", pilots: "alla piloter", atc: "alla ATC" };
+const apNameOf = (id) => (airportById(id) || {}).name || id;
+const audienceLabel = (n) => (n.audience === "airport" ? "piloter vid " + apNameOf(n.airport) : AUDIENCE[n.audience]);
+
+function annCard(n) {
+  const me = S.me;
+  const canDelete = me.role === "admin" || (me.role === "atc" && n.from === me.username);
+  const who = n.fromRole === "admin" ? "Admin" : "ATC " + esc(n.from) + (n.airport ? ", " + esc(apNameOf(n.airport)) : "");
+  return `<article class="ann ${n.fromRole}"><div class="hd"><span><b>${who}</b> till ${esc(audienceLabel(n))}</span><span>${clock(n.createdAt)} · ${dayLabel(n.createdAt)}</span></div>
+    <div class="tx">${esc(n.text)}</div>
+    ${canDelete ? `<div class="sa"><button class="btn alt sm" data-action="ann-del" data-id="${esc(n.id)}">Ta bort</button></div>` : ""}</article>`;
+}
+
+function annCompose() {
+  const me = S.me;
+  if (me.role === "atc" && !me.airport) return `<p class="lead" style="margin:0">Gå på tjänst vid en flygplats för att kunna lägga ut information till piloter.</p>`;
+  const opts = me.role === "admin"
+    ? [["all", "Alla (piloter och ATC)"], ["pilots", "Alla piloter"], ["atc", "Alla ATC"]]
+    : [["airport", "Piloter vid " + apNameOf(me.airport)], ["pilots", "Alla piloter"]];
+  if (!opts.some((o) => o[0] === ui.ann.audience)) ui.ann.audience = opts[0][0];
+  return `<form data-form="announce">
+    <div class="field" style="max-width:420px"><label class="f" for="ana">Visa för</label>
+      <select id="ana" data-bind="ann.audience">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === ui.ann.audience ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+    <div class="field"><label class="f" for="ant">Information</label>
+      <textarea id="ant" maxlength="300" placeholder="Skriv informationen som mottagarna ska se på startsidan" data-bind="ann.text">${esc(ui.ann.text)}</textarea>
+      <small>Max 300 tecken. Visas på startsidan i 7 dygn, eller tills du tar bort den.</small></div>
+    <button class="btn" type="submit">Lägg ut på startsidan</button></form>`;
+}
+
+function homePanel() {
+  const me = S.me, anns = S.data.announcements || [];
+  const sub = me.role === "pilot"
+    ? (me.flightNumber ? "Flyg " + esc(me.flightNumber) + " (" + esc(me.airline) + ")" : "Registrera ditt flyg för att kunna begära tillstånd.")
+    : me.role === "atc"
+      ? (me.airport ? "Du är på tjänst vid " + esc(apNameOf(me.airport)) + "." : "Du är inte på tjänst än.")
+      : "Du är inloggad som admin.";
+  const canPost = me.role === "admin" || me.role === "atc";
+  return `<section class="block"><div class="panel home"><h2>Välkommen, ${esc(me.username)}</h2>
+    <p class="lead" style="margin-bottom:0">${sub}</p>
+    <h3>Information</h3>
+    ${anns.length ? `<div class="ann-list">${anns.map(annCard).join("")}</div>` : `<p style="color:var(--ink-2)">Ingen information just nu.</p>`}
+    ${canPost ? `<h3 style="margin-top:20px">Lägg ut information</h3>${annCompose()}` : ""}</div></section>`;
+}
+
+/* --- Aktivitet (admin) --- */
+function sinceText(ts, now) {
+  const m = Math.floor((now - ts) / 60000);
+  if (m < 1) return "nyss";
+  if (m < 60) return "för " + m + " min sedan";
+  if (m < 24 * 60) return "för " + Math.floor(m / 60) + " tim sedan";
+  return dayLabel(ts) + " " + clock(ts);
+}
+
+function describePerson(p, now) {
+  if (p.role === "atc") return p.airport ? (p.online ? "På tjänst vid " : "Senast på tjänst vid ") + esc(apNameOf(p.airport)) : "Inte på tjänst";
+  const parts = [];
+  if (p.request) parts.push(esc(TYPE[p.request.type]) + " på bana " + esc(p.request.runway) + " vid " + esc(apNameOf(p.request.airport)) + " (" + esc(STATUS[p.request.status].toLowerCase()) + ")");
+  if (p.enroute) parts.push("På väg till " + esc(p.enroute.destination) + (p.enroute.eta ? ", " + esc(etaText(p.enroute.eta, now).toLowerCase()) : ""));
+  if (!parts.length) parts.push(p.flightNumber ? "Flyg " + esc(p.flightNumber) + " (" + esc(p.airline) + "), inget pågår" : "Har inte registrerat något flyg");
+  return parts.join(" · ");
+}
+
+function activityPanel() {
+  const a = S.activity, f = ui.activityFilter;
+  if (!a) return `<section class="block" id="activity"><div class="panel"><h2>Aktivitet</h2><p class="lead" style="margin:0">Hämtar aktivitet…</p></div></section>`;
+  const people = a.people.filter((p) => f === "all" || p.role === f);
+  const events = a.events.filter((e) => f === "all" || e.role === f);
+  const online = a.people.filter((p) => p.online).length;
+  const person = (p) => `<article class="person ${p.online ? "" : "off"}"><div class="ph"><span class="dot ${p.online ? "on" : ""}" aria-hidden="true"></span><b>${esc(p.username)}</b><span class="pillrole">${ROLE[p.role]}</span>
+      <span class="seen">${p.online ? "Online" : p.lastSeen ? "Senast aktiv " + esc(sinceText(p.lastSeen, a.now)) : "Har inte loggat in"}</span></div>
+      <div class="pd">${describePerson(p, a.now)}</div></article>`;
+  const event = (e) => `<li class="ev ${esc(e.role)}"><span class="et">${dayLabel(e.at)} ${clock(e.at)}</span><span class="tx"><b>${esc(e.actor)}</b> ${esc(e.text)}</span></li>`;
+  return `<section class="block" id="activity"><header><h2>Aktivitet</h2><p>${online} ${online === 1 ? "person" : "personer"} online just nu</p>
+      <div class="hd-actions"><label class="f" for="actf" style="position:absolute;left:-9999px">Visa</label>
+        <select id="actf" data-bind="activityFilter" style="min-width:160px"><option value="all" ${f === "all" ? "selected" : ""}>Alla</option><option value="pilot" ${f === "pilot" ? "selected" : ""}>Bara piloter</option><option value="atc" ${f === "atc" ? "selected" : ""}>Bara ATC</option></select></div></header>
+    <div class="act-grid">
+      <div class="act-col"><h3>Just nu</h3>${people.length ? `<div class="act-scroll">${people.map(person).join("")}</div>` : empty("Inga konton att visa.")}</div>
+      <div class="act-col"><h3>Senaste händelser</h3>${events.length ? `<ul class="events">${events.map(event).join("")}</ul>` : empty("Inga händelser de senaste 48 timmarna.")}</div>
+    </div></section>`;
+}
+
 /* --- Flyg på väg / ankommande flyg --- */
 function etaText(eta, now) {
   if (!eta) return "Ankomsttid okänd";
@@ -625,7 +764,8 @@ function pilotView() {
       <div class="strips">${strip(active, { actions: `<button class="btn alt sm" data-action="cancel" data-id="${esc(active.id)}">${active.status === "approved" ? "Avsluta tillstånd" : "Avbryt förfrågan"}</button>` })}</div></section>`;
   }
 
-  return `${activeBlock}
+  return `${homePanel()}
+  ${activeBlock}
   <section class="block"><div class="grid2">
     <div class="panel ${ready ? "" : "hl"}">
       <h2>Ditt flyg</h2>
@@ -688,13 +828,14 @@ function atcView() {
       ${myAp ? `<button class="btn alt" type="button" data-action="duty-off">Gå av tjänst</button>` : ""}
     </div></form></div></section>`;
 
-  if (!myAp) return duty + `<section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>`;
+  if (!myAp) return homePanel() + duty + `<section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>`;
 
   const pendingActions = (r) => `<input type="text" maxlength="140" placeholder="Meddelande till piloten (valfritt)" aria-label="Meddelande till piloten" data-bind="notes.${esc(r.id)}" value="${esc(ui.notes[r.id] || "")}">
     <div class="row"><button class="btn go sm" data-action="decide" data-act="approve" data-id="${esc(r.id)}">Godkänn</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Neka</button></div>`;
   const approvedActions = (r) => `<div class="row"><button class="btn sm" data-action="decide" data-act="complete" data-id="${esc(r.id)}">Banan är fri</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Återkalla</button></div>`;
 
-  return `${duty}
+  return `${homePanel()}
+  ${duty}
   <section class="block"><header><h2>Banor vid ${esc(myAp.name)}</h2></header>
     <div class="aps">${airportCard(myAp, false)}</div></section>
   ${inboundSection()}
@@ -730,7 +871,9 @@ function adminView() {
     <td><div class="acts">${u.status !== "approved" ? btn(u, "approve", "Godkänn", "go") : btn(u, "reject", "Spärra", "alt")}
       ${btn(u, "password", "Nytt lösenord", "alt")}${btn(u, "delete", "Ta bort", "stop")}</div></td></tr>`).join("");
 
-  return `<section class="block"><header><h2>Konton som väntar</h2><p>${pend.length} ${pend.length === 1 ? "konto" : "konton"}</p></header>${pendCards}</section>
+  return `${ui.activityOpen ? activityPanel() : ""}
+  ${homePanel()}
+  <section class="block"><header><h2>Konton som väntar</h2><p>${pend.length} ${pend.length === 1 ? "konto" : "konton"}</p></header>${pendCards}</section>
   <section class="block"><header><h2>Alla konton</h2></header>
     ${users.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Användare</th><th>Typ</th><th>Status</th><th>Uppgifter</th><th>Åtgärder</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Det finns inga konton än.")}</section>
   ${adminStatus()}
@@ -752,7 +895,7 @@ document.addEventListener("change", (e) => {
   if (!b) return;
   setPath(ui, b, t.value);
   if (b === "pilot.airport") { ui.pilot.runway = ""; render(); }
-  else if (b === "atcAirport" || b === "reg.role" || b === "adminAirport") render();
+  else if (b === "atcAirport" || b === "reg.role" || b === "adminAirport" || b === "activityFilter") render();
 });
 
 async function call(path, body, okMsg) {
@@ -774,6 +917,7 @@ document.addEventListener("submit", async (e) => {
       try { localStorage.setItem("edu_token", r.token); } catch (x) {}
       await refresh(true);
       startPolling();
+      toast("Välkommen, " + r.user.username + "!", "ok");
     } else if (f === "register") {
       if (ui.reg.password !== ui.reg.password2) throw new Error("Lösenorden är inte likadana.");
       await api("register", { method: "POST", body: { username: ui.reg.username.trim(), password: ui.reg.password, role: ui.reg.role } });
@@ -792,6 +936,11 @@ document.addEventListener("submit", async (e) => {
       await api("messages", { method: "POST", body: { airport: ui.acars.airport, to: ui.acars.to, text: ui.acars.text } });
       ui.acars.text = "";
       toast("ACARS skickat.", "ok");
+      await refresh(true);
+    } else if (f === "announce") {
+      await api("announcements", { method: "POST", body: { audience: ui.ann.audience, text: ui.ann.text } });
+      ui.ann.text = "";
+      toast("Informationen är utlagd.", "ok");
       await refresh(true);
     } else if (f === "enroute") {
       await api("enroute", { method: "POST", body: { active: true, etaMinutes: ui.enroute.eta } });
@@ -833,6 +982,22 @@ document.addEventListener("click", async (e) => {
       await call("requests/" + encodeURIComponent(id) + "/decide", { action: act, note: ui.notes[id] || "" },
         { approve: "Godkänd.", deny: "Nekad.", complete: "Banan är fri." }[act]);
       delete ui.notes[id];
+    }
+    else if (a === "activity-toggle") {
+      ui.activityOpen = !ui.activityOpen;
+      if (ui.activityOpen) {
+        render();
+        await refresh(true);
+        const n = $("#activity");
+        if (n && n.scrollIntoView) n.scrollIntoView({ block: "start" });
+      } else {
+        S.activity = null;
+        render();
+      }
+    }
+    else if (a === "ann-del") {
+      el.disabled = true;
+      await call("announcements/" + encodeURIComponent(el.dataset.id) + "/delete", {}, "Informationen är borttagen.");
     }
     else if (a === "enroute-off") {
       el.disabled = true;

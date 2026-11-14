@@ -32,6 +32,12 @@ const ACTIVE = ["pending", "approved"];
 const MESSAGE_TTL = 24 * 3600 * 1000; // ACARS-meddelanden rensas efter 24 h
 const ENROUTE_TTL = 3 * 3600 * 1000; // "på väg" avslutas automatiskt efter 3 h
 const ID_RE = /^[a-z0-9]+-[a-f0-9]{8}$/;
+const EVENT_TTL = 48 * 3600 * 1000; // aktivitetsloggen sparas i 48 h
+const EVENT_KEEP = 300; // och högst 300 händelser
+const SEEN_ONLINE = 90 * 1000; // räknas som online 90 s efter senaste aktivitet
+const ANN_TTL = 7 * 24 * 3600 * 1000; // information på startsidan försvinner efter 7 dygn
+const TYPE_SV = { landing: "landning", takeoff: "start" };
+const short = (s, n = 80) => (String(s).length > n ? String(s).slice(0, n - 1) + "…" : String(s));
 
 const MC_NAME = /^[A-Za-z0-9_]{3,16}$/;
 const FLIGHT_RE = /^[A-Z0-9][A-Z0-9 \-]{1,11}$/;
@@ -206,7 +212,50 @@ async function login(req, db) {
   if (u.status === "pending") throw new HttpError(403, "Ditt konto väntar fortfarande på godkännande av admin.");
   if (u.status === "rejected") throw new HttpError(403, "Ditt konto har nekats av admin.");
   await db.throttle.delete(lc);
+  await touchSeen(db, u, { force: true });
+  await logEvent(db, u, "loggade in");
   return newSession(db, u);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Aktivitetslogg och "senast aktiv" (visas för admin)                */
+/* ------------------------------------------------------------------ */
+async function logEvent(db, me, text, extra = {}) {
+  try {
+    const now = Date.now();
+    const id = now.toString(36) + "-" + crypto.randomBytes(3).toString("hex");
+    await db.activity.setJSON("e/" + id, { id, at: now, actor: me.username, role: me.role, text, ...extra });
+  } catch (e) {
+    console.error("logEvent", e); // loggen får aldrig stoppa den vanliga åtgärden
+  }
+}
+
+async function loadEvents(db, limit = 150) {
+  const now = Date.now();
+  const { blobs } = await db.activity.list({ prefix: "e/" });
+  // Nycklarna börjar med tidsstämpeln (base 36), så de går att sortera och rensa utan att läsa dem
+  const keys = blobs.map((b) => b.key).sort().reverse();
+  const keep = [];
+  const drop = [];
+  for (const k of keys) {
+    const ts = parseInt(k.slice(2).split("-")[0], 36);
+    if (!Number.isFinite(ts) || now - ts > EVENT_TTL || keep.length >= EVENT_KEEP) drop.push(k);
+    else keep.push(k);
+  }
+  await Promise.all(drop.map((k) => db.activity.delete(k)));
+  const rows = (await Promise.all(keep.slice(0, limit).map((k) => db.activity.get(k, { type: "json" })))).filter(Boolean);
+  return rows.sort((a, b) => b.at - a.at);
+}
+
+async function touchSeen(db, me, { force = false, out = false } = {}) {
+  if (me.role === "admin") return;
+  const key = me.username.toLowerCase();
+  const now = Date.now();
+  if (!force) {
+    const s = await db.seen.get(key, { type: "json" });
+    if (s && !s.out && now - s.at < 30 * 1000) return; // skriv högst var 30:e sekund
+  }
+  await db.seen.setJSON(key, { username: me.username, role: me.role, at: now, out });
 }
 
 /* ------------------------------------------------------------------ */
@@ -343,7 +392,9 @@ async function setEnroute(req, me, db) {
   const { active, etaMinutes } = await readBody(req);
   const key = me.username.toLowerCase();
   if (!active) {
+    const had = await db.enroute.get(key, { type: "json" });
     await db.enroute.delete(key);
+    if (had) await logEvent(db, me, `avslutade sin flygning till ${had.destination} (${had.flightNumber})`, { airport: had.airport });
     return json({ ok: true });
   }
   if (!me.flightNumber || !me.airline) throw bad("Registrera flygnummer och flygbolag först.");
@@ -359,16 +410,27 @@ async function setEnroute(req, me, db) {
   }
   const f = { username: me.username, flightNumber: me.flightNumber, airline: me.airline, destination: ap.name, airport: ap.id, since: now, eta };
   await db.enroute.setJSON(key, f);
+  await logEvent(db, me, `anmälde sig på väg till ${ap.name} (${me.flightNumber})`, { airport: ap.id });
   return json({ flight: f }, 201);
+}
+
+// En pilot räknas som "vid" en flygplats om hen har en förfrågan där, är på väg dit eller har skrivit till/fått svar därifrån.
+// För information på startsidan räknas även sparad destination.
+function pilotAirports(me, { msgs = [], reqs = [], enroute = [], destination = false } = {}) {
+  const set = new Set();
+  for (const r of reqs) if (r.pilot === me.username) set.add(r.airport);
+  for (const f of enroute) if (f.username === me.username) set.add(f.airport);
+  for (const m of msgs) if (m.from === me.username || m.to === me.username) set.add(m.airport);
+  if (destination) {
+    const ap = resolveAirport(me.destination);
+    if (ap) set.add(ap.id);
+  }
+  return set;
 }
 
 function visibleMessages(me, msgs, reqs, enroute = []) {
   if (me.role === "pilot") {
-    // En pilot räknas som "vid" en flygplats om hen har en förfrågan där, är på väg dit eller har skrivit till/fått svar därifrån
-    const airports = new Set();
-    for (const r of reqs) if (r.pilot === me.username) airports.add(r.airport);
-    for (const f of enroute) if (f.username === me.username) airports.add(f.airport);
-    for (const m of msgs) if (m.from === me.username || m.to === me.username) airports.add(m.airport);
+    const airports = pilotAirports(me, { msgs, reqs, enroute });
     return msgs.filter(
       (m) => m.from === me.username || m.to === me.username || m.scope === "all" || (m.scope === "airport" && airports.has(m.airport))
     );
@@ -410,12 +472,73 @@ async function sendMessage(req, me, db) {
   const id = now.toString(36) + "-" + crypto.randomBytes(4).toString("hex");
   const msg = { id, from: me.username, text, createdAt: now, ...extra };
   await db.messages.setJSON("m/" + id, msg);
+  const apName = (findAirport(extra.airport) || {}).name || extra.airport;
+  const target = extra.fromRole === "pilot" ? "ATC vid " + apName : extra.scope === "all" ? "alla piloter" : extra.scope === "airport" ? "alla vid " + apName : extra.to;
+  await logEvent(db, me, `skickade ACARS till ${target}: "${short(text)}"`, { airport: extra.airport });
   return json({ message: msg }, 201);
+}
+
+/* ---------------- Information på startsidan (admin och ATC) ---------------- */
+const ANN_AUDIENCES = { admin: ["all", "pilots", "atc"], atc: ["airport", "pilots"] };
+
+async function loadAnnouncements(db) {
+  const now = Date.now();
+  const { blobs } = await db.announcements.list({ prefix: "n/" });
+  const all = (await Promise.all(blobs.map((b) => db.announcements.get(b.key, { type: "json" })))).filter(Boolean);
+  const out = [];
+  for (const n of all) {
+    if (now - n.createdAt > ANN_TTL) {
+      await db.announcements.delete("n/" + n.id);
+      continue;
+    }
+    out.push(n);
+  }
+  return out.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function visibleAnnouncements(me, anns, airports) {
+  if (me.role === "admin") return anns;
+  if (me.role === "atc") return anns.filter((n) => n.from === me.username || n.audience === "all" || n.audience === "atc");
+  return anns.filter((n) => n.audience === "all" || n.audience === "pilots" || (n.audience === "airport" && airports.has(n.airport)));
+}
+
+async function createAnnouncement(req, me, db) {
+  if (me.role !== "admin" && me.role !== "atc") throw new HttpError(403, "Endast admin och ATC kan lägga ut information.");
+  const { audience, text: raw } = await readBody(req);
+  if (!ANN_AUDIENCES[me.role].includes(audience)) throw bad("Välj vem informationen ska visas för.");
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!text) throw bad("Skriv en information.");
+  if (text.length > 300) throw bad("Informationen är för lång (max 300 tecken).");
+  if (me.role === "atc" && !me.airport) throw bad("Gå på tjänst vid en flygplats först.");
+
+  const mine = (await loadAnnouncements(db)).filter((n) => n.from === me.username);
+  const now = Date.now();
+  if (mine.filter((n) => now - n.createdAt < 60000).length >= 5) throw new HttpError(429, "Du lägger ut information för snabbt. Vänta en stund.");
+  if (mine.length >= 10) throw bad("Du har redan 10 aktiva informationer. Ta bort någon först.");
+
+  const id = now.toString(36) + "-" + crypto.randomBytes(4).toString("hex");
+  const n = { id, from: me.username, fromRole: me.role, audience, airport: me.role === "atc" ? me.airport : null, text, createdAt: now };
+  await db.announcements.setJSON("n/" + id, n);
+  const who = { all: "alla", pilots: "alla piloter", atc: "alla ATC", airport: "piloter vid " + ((findAirport(n.airport) || {}).name || n.airport) }[audience];
+  await logEvent(db, me, `lade ut information till ${who}: "${short(text)}"`, { airport: n.airport });
+  return json({ announcement: n }, 201);
+}
+
+async function deleteAnnouncement(me, db, id) {
+  if (!ID_RE.test(id)) throw new HttpError(404, "Informationen hittades inte.");
+  const n = await db.announcements.get("n/" + id, { type: "json" });
+  if (!n) throw new HttpError(404, "Informationen hittades inte.");
+  const allowed = me.role === "admin" || (me.role === "atc" && n.from === me.username);
+  if (!allowed) throw new HttpError(403, "Du kan bara ta bort din egen information.");
+  await db.announcements.delete("n/" + id);
+  await logEvent(db, me, `tog bort information: "${short(n.text, 60)}"`, { airport: n.airport });
+  return json({ ok: true });
 }
 
 async function state(me, db) {
   await heartbeat(db, me);
-  const [reqs, presence, msgs, statuses, enroute] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db), loadEnroute(db)]);
+  await touchSeen(db, me);
+  const [reqs, presence, msgs, statuses, enroute, anns] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db), loadEnroute(db), loadAnnouncements(db)]);
   let visible = [];
   if (me.role === "pilot") visible = reqs.filter((r) => r.pilot === me.username).slice(0, 25);
   else if (me.role === "atc" && me.airport) visible = reqs.filter((r) => r.airport === me.airport).slice(0, 80);
@@ -450,6 +573,7 @@ async function state(me, db) {
     contacts,
     inbound,
     myFlight,
+    announcements: visibleAnnouncements(me, anns, me.role === "pilot" ? pilotAirports(me, { msgs, reqs, enroute, destination: true }) : new Set()).slice(0, 30),
     now: Date.now(),
   });
 }
@@ -473,16 +597,22 @@ async function profile(req, me, db) {
     u.airline = airline;
     u.destination = destination;
     await db.users.setJSON(key, u);
+    await logEvent(db, me, `uppdaterade sitt flyg: ${flightNumber}, ${airline}${destination ? ", destination " + destination : ""}`);
     return json({ me: publicUser(u) });
   }
 
   if (me.role === "atc") {
     const airport = body.airport || null;
     if (airport !== null && !findAirport(airport)) throw bad("Okänd flygplats.");
+    const before = u.airport || null;
     u.airport = airport;
     await db.users.setJSON(key, u);
     if (airport) await db.presence.setJSON(key, { username: u.username, airport, lastSeen: Date.now() });
     else await db.presence.delete(key);
+    if (airport !== before) {
+      const name = airport ? findAirport(airport).name : null;
+      await logEvent(db, me, airport ? `gick på tjänst vid ${name}` : "gick av tjänst", { airport: airport || before });
+    }
     return json({ me: publicUser(u) });
   }
   throw bad("Kontot har ingen profil att spara.");
@@ -524,6 +654,7 @@ async function createRequest(req, me, db) {
     approvedAt: null,
   };
   await db.requests.setJSON("r/" + id, r);
+  await logEvent(db, me, `begärde ${TYPE_SV[type]} på bana ${runway} vid ${ap.name} (${me.flightNumber})`, { airport: ap.id });
   return json({ request: r }, 201);
 }
 
@@ -569,6 +700,8 @@ async function decide(req, me, db, id) {
   r.decidedBy = me.username;
   r.updatedAt = now;
   await db.requests.setJSON("r/" + r.id, r);
+  const verb = { approve: "godkände", deny: "nekade", complete: "avslutade tillståndet för" }[action];
+  await logEvent(db, me, `${verb} ${r.flightNumber} (${TYPE_SV[r.type]}, bana ${r.runway}) vid ${(findAirport(r.airport) || {}).name || r.airport}`, { airport: r.airport });
   return json({ request: r });
 }
 
@@ -579,6 +712,7 @@ async function cancel(me, db, id) {
   r.status = "cancelled";
   r.updatedAt = Date.now();
   await db.requests.setJSON("r/" + r.id, r);
+  await logEvent(db, me, `avbröt sin förfrågan (${r.flightNumber}, bana ${r.runway})`, { airport: r.airport });
   return json({ request: r });
 }
 
@@ -605,6 +739,7 @@ async function adminUserAction(req, db, name, action) {
     await db.users.delete(key);
     await db.presence.delete(key);
     await db.enroute.delete(key);
+    await db.seen.delete(key);
     return json({ ok: true });
   } else if (action === "password") {
     const { password } = await readBody(req);
@@ -633,35 +768,81 @@ async function airportAction(req, me, db, id, action) {
   const st = await getStatus(db, id);
   const clean = (v, max) => String(v || "").replace(/\s+/g, " ").trim().slice(0, max);
   const now = Date.now();
+  let logText;
 
   if (action === "close") {
     st.closed = true;
     st.reason = clean(body.reason, 100);
     st.closedBy = me.username;
     st.closedAt = now;
+    logText = `stängde ${ap.name}${st.reason ? ": " + st.reason : ""}`;
   } else if (action === "open") {
     st.closed = false;
     st.reason = "";
     st.closedBy = null;
     st.closedAt = null;
+    logText = `öppnade ${ap.name}`;
   } else if (action === "runway") {
     if (!ap.runways.includes(body.runway)) throw bad("Banan finns inte på den flygplatsen.");
-    if (body.closed) st.runways[body.runway] = { reason: clean(body.reason, 100), by: me.username, at: now };
-    else delete st.runways[body.runway];
+    if (body.closed) {
+      st.runways[body.runway] = { reason: clean(body.reason, 100), by: me.username, at: now };
+      logText = `stängde bana ${body.runway} vid ${ap.name}${st.runways[body.runway].reason ? ": " + st.runways[body.runway].reason : ""}`;
+    } else {
+      delete st.runways[body.runway];
+      logText = `öppnade bana ${body.runway} vid ${ap.name}`;
+    }
   } else if (action === "notice-add") {
     const text = clean(body.text, 100);
     if (!text) throw bad("Skriv en information.");
     if (st.notices.length >= 10) throw bad("Det finns redan 10 informationsrader. Ta bort någon först.");
     st.notices.push({ id: now.toString(36) + "-" + crypto.randomBytes(2).toString("hex"), text, by: me.username, createdAt: now });
+    logText = `la ut information vid ${ap.name}: "${short(text)}"`;
   } else if (action === "notice-remove") {
     const before = st.notices.length;
     st.notices = st.notices.filter((n) => n.id !== body.id);
     if (st.notices.length === before) throw new HttpError(404, "Informationen finns inte.");
+    logText = `tog bort information vid ${ap.name}`;
   } else {
     throw bad("Okänd åtgärd.");
   }
   await db.airportstatus.setJSON(id, st);
+  await logEvent(db, me, logText, { airport: id });
   return json({ ok: true });
+}
+
+/* ---------------- Aktivitet: vad ATC och piloter gör just nu (admin) ---------------- */
+async function adminActivity(db) {
+  const now = Date.now();
+  const [users, seenRows, enroute, reqs, events] = await Promise.all([
+    db.users.list().then(({ blobs }) => Promise.all(blobs.map((b) => db.users.get(b.key, { type: "json" })))),
+    db.seen.list().then(({ blobs }) => Promise.all(blobs.map((b) => db.seen.get(b.key, { type: "json" })))),
+    loadEnroute(db),
+    loadRequests(db),
+    loadEvents(db),
+  ]);
+  const seen = new Map(seenRows.filter(Boolean).map((s) => [s.username.toLowerCase(), s]));
+  const people = users
+    .filter((u) => u && u.status === "approved" && (u.role === "pilot" || u.role === "atc"))
+    .map((u) => {
+      const s = seen.get(u.username.toLowerCase());
+      const p = { username: u.username, role: u.role, lastSeen: s ? s.at : null, online: !!s && !s.out && now - s.at < SEEN_ONLINE };
+      if (u.role === "pilot") {
+        const q = reqs.find((r) => r.pilot === u.username && ACTIVE.includes(r.status));
+        const f = enroute.find((x) => x.username === u.username);
+        Object.assign(p, {
+          flightNumber: u.flightNumber || "",
+          airline: u.airline || "",
+          destination: u.destination || "",
+          request: q ? { status: q.status, type: q.type, runway: q.runway, airport: q.airport } : null,
+          enroute: f ? { destination: f.destination, airport: f.airport, eta: f.eta } : null,
+        });
+      } else {
+        p.airport = u.airport || null;
+      }
+      return p;
+    })
+    .sort((a, b) => Number(b.online) - Number(a.online) || (b.lastSeen || 0) - (a.lastSeen || 0) || a.username.localeCompare(b.username));
+  return json({ people, events, now });
 }
 
 async function adminDeleteRequest(db, id) {
@@ -723,6 +904,10 @@ async function route(req, db) {
 
   if (m === "POST" && a === "logout") {
     await db.sessions.delete(sessionKey);
+    if (me.role !== "admin") {
+      await touchSeen(db, me, { force: true, out: true });
+      await logEvent(db, me, "loggade ut");
+    }
     return json({ ok: true });
   }
   if (m === "GET" && a === "me") return json({ me: publicUser(me) });
@@ -733,6 +918,8 @@ async function route(req, db) {
   if (m === "POST" && a === "requests" && b && c === "cancel") return cancel(me, db, b);
   if (m === "POST" && a === "messages" && !b) return sendMessage(req, me, db);
   if (m === "POST" && a === "enroute" && !b) return setEnroute(req, me, db);
+  if (m === "POST" && a === "announcements" && !b) return createAnnouncement(req, me, db);
+  if (m === "POST" && a === "announcements" && b && c === "delete") return deleteAnnouncement(me, db, b);
   if (m === "POST" && a === "airports" && b && c && !d) return airportAction(req, me, db, b, c);
 
   if (a === "admin") {
@@ -741,6 +928,7 @@ async function route(req, db) {
     if (m === "POST" && b === "requests" && c && d === "delete") return adminDeleteRequest(db, c);
     if (m === "POST" && b === "messages" && c === "clear" && !d) return adminClearMessages(db);
     if (m === "POST" && b === "messages" && c && d === "delete") return adminDeleteMessage(db, c);
+    if (m === "GET" && b === "activity" && !c) return adminActivity(db);
     if (m === "GET" && b === "users" && !c) return adminUsers(db);
     if (m === "POST" && b === "users" && c && d) return adminUserAction(req, db, c, d);
   }
@@ -758,6 +946,9 @@ export function createHandler(getStoreFn) {
         presence: open("presence"),
         messages: open("messages"),
         enroute: open("enroute"),
+        activity: open("activity"),
+        seen: open("seen"),
+        announcements: open("announcements"),
         airportstatus: open("airportstatus"),
         throttle: open("throttle"),
       };
