@@ -250,6 +250,21 @@ button.rwy:hover{filter:brightness(1.2)}
 .ev .et{color:var(--ink-2);font-size:.85rem}
 .ev .tx{overflow-wrap:anywhere}
 
+/* Väder, tid på dygnet och nödläge */
+.conds{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-block;background:var(--paper-2);border:2px solid var(--line);border-radius:3px;padding:2px 8px;font-size:.88rem;font-weight:700;color:var(--ink)}
+.cond-note{font-size:.88rem;color:var(--ink-2);margin:0}
+.pk{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 14px}
+.pk button{border:2px solid var(--line);background:var(--field);color:var(--ink);border-radius:3px;padding:6px 12px;font-weight:600;cursor:pointer;font-size:.95rem}
+.pk button:hover{background:var(--paper-2)}
+.pk button[aria-pressed="true"]{background:var(--yellow);color:var(--on-yellow);border-color:var(--yellow)}
+.sos{border:3px solid var(--red);background:var(--tint-red);border-radius:3px;padding:14px 16px;margin-bottom:14px}
+.sos h2{color:var(--red);margin:0 0 4px}
+.sos p{margin:0 0 6px}
+.sos .row{margin-top:8px;align-items:center}
+.sos select{max-width:180px}
+.sos-badge{display:inline-block;background:var(--red);color:#fff;font-family:var(--display);font-weight:900;padding:1px 8px;border-radius:3px;margin-bottom:6px}
+
 /* Gater och terminaler */
 .terminal+.terminal{margin-top:14px}
 .terminal h3{margin-bottom:6px}
@@ -318,11 +333,15 @@ button.rwy.tg:hover{filter:brightness(1.25)}
 const ACTIVE = ["pending", "approved"];
 const STATUS = { pending: "Väntar", approved: "Godkänd", denied: "Nekad", completed: "Genomförd", cancelled: "Avbruten", expired: "Utgången" };
 const TYPE = { landing: "Landning", takeoff: "Start" };
+const WEATHER = { clear: "Klart", cloudy: "Molnigt", rain: "Regn", thunder: "Åska", snow: "Snö", fog: "Dimma", storm: "Storm" };
+const TIMEOFDAY = { dawn: "Gryning", day: "Dag", dusk: "Skymning", night: "Natt" };
+// En genomförd landning eller start visas som lyckad
+const statusLine = (q) => (q.status === "completed" ? "Lyckad " + TYPE[q.type].toLowerCase() : STATUS[q.status] + " · " + TYPE[q.type]);
 const ROLE = { pilot: "Pilot", atc: "ATC", admin: "Admin" };
 const POLL_MS = 8000;
 
 /* ---------- Tillstånd ---------- */
-const S = { token: null, me: null, data: null, users: null, activity: null, sig: "", offline: false, booting: true, knownMsgs: null, knownAnns: null, knownGate: undefined };
+const S = { token: null, me: null, data: null, users: null, activity: null, sig: "", offline: false, booting: true, knownMsgs: null, knownAnns: null, knownGate: undefined, knownEmg: null };
 const ui = {
   tab: "login",
   login: { username: "", password: "" },
@@ -338,6 +357,9 @@ const ui = {
   adminAirport: "",
   ann: { audience: "", text: "" },
   gate: { pilot: "", terminal: "", gate: "" },
+  cond: { airports: [], touched: false, weather: "", time: "", note: "" },
+  emg: { open: false, airport: "", runway: "", kind: "", text: "" },
+  helpRw: {},
   activityOpen: false,
   activityFilter: "all",
   regDone: false,
@@ -389,7 +411,9 @@ function toast(msg, kind = "info") {
 }
 
 function forceLogout(msg) {
-  S.token = null; S.me = null; S.data = null; S.users = null; S.activity = null; S.sig = ""; S.knownMsgs = null; S.knownAnns = null; S.knownGate = undefined; ui.profileInit = false;
+  S.token = null; S.me = null; S.data = null; S.users = null; S.activity = null; S.sig = ""; S.knownMsgs = null; S.knownAnns = null; S.knownGate = undefined; S.knownEmg = null; ui.profileInit = false;
+  ui.cond = { airports: [], touched: false, weather: "", time: "", note: "" };
+  ui.emg = { open: false, airport: "", runway: "", kind: "", text: "" }; ui.helpRw = {};
   ui.gate = { pilot: "", terminal: "", gate: "" };
   ui.acars = { airport: "", to: "", text: "" };
   ui.ann = { audience: "", text: "" };
@@ -439,6 +463,17 @@ async function refresh(force) {
         toast("Du har fått Gate " + mg.gate + ", " + mg.terminalName + " vid " + ((data.airports.find((a) => a.id === mg.airport) || {}).name || mg.airport) + ".", "ok");
       S.knownGate = gk;
     }
+    const em = data.emergencies || [];
+    if (S.knownEmg) {
+      for (const e of em) {
+        const was = S.knownEmg.get(e.id);
+        if (S.me.role !== "pilot" && was === undefined && e.status === "active")
+          toast("NÖDLÄGE: " + e.flightNumber + " (" + e.kindLabel + ") vid " + apNameOf(e.airport) + (e.runway ? ", bana " + e.runway : "") + ".", "err");
+        if (S.me.role === "pilot" && was !== undefined && was !== "help-sent" && e.status === "help-sent")
+          toast("Hjälp är på väg till bana " + e.helpRunway + ".", "ok");
+      }
+    }
+    S.knownEmg = new Map(em.map((e) => [e.id, e.status]));
     if (!ui.profileInit) {
       ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "", destination: S.me.destination || "" };
       ui.atcAirport = S.me.airport || "";
@@ -560,6 +595,8 @@ function airportCard(a, mine) {
     ${a.closed ? `<div class="closed-banner"><b>Flygplatsen är stängd</b>${a.closedReason ? `<span>${esc(a.closedReason)}</span>` : ""}</div>` : ""}
     <div class="rwys">${a.runways.map((rw) => runwayBlock(rw, a.runwayStatus[rw], a.runwayClosed[rw])).join("")}</div>
     ${shutList.length ? `<ul class="rw-reasons">${shutList.map((rw) => `<li>Bana ${esc(rw)} är stängd${a.runwayClosed[rw].reason ? ": " + esc(a.runwayClosed[rw].reason) : ""}</li>`).join("")}</ul>` : ""}
+    ${a.weather || a.tod ? `<div class="conds">${a.weather ? `<span class="chip" title="Rapporterat av ${esc(a.weather.by)}">${esc(a.weather.label)}</span>` : ""}${a.tod ? `<span class="chip" title="Rapporterat av ${esc(a.tod.by)}">${esc(a.tod.label)}</span>` : ""}</div>${a.weather && a.weather.note ? `<p class="cond-note">${esc(a.weather.note)}</p>` : ""}` : ""}
+    ${a.emergencies ? `<div class="closed-banner"><b>Nödläge pågår</b></div>` : ""}
     ${a.notices.length ? `<ul class="notices">${a.notices.map((n) => `<li>${esc(n.text)}</li>`).join("")}</ul>` : ""}
     ${foot.length ? `<footer>${foot.map(esc).join("<br>")}</footer>` : ""}
   </article>`;
@@ -574,7 +611,7 @@ function strip(r, { actions = "", showPilot = false } = {}) {
       <div class="sub">${showPilot ? esc(r.pilot) + " · " : ""}${esc(ap ? ap.name : r.airport)}</div>
       ${r.destination ? `<div class="sub">Destination: <b>${esc(r.destination)}</b></div>` : ""}</div>
     <div class="rw"><b>${esc(r.runway)}</b><small>bana</small></div>
-    <div><span class="status ${r.status}">${STATUS[r.status]} · ${TYPE[r.type]}</span>
+    <div><span class="status ${r.status}">${statusLine(r)}</span>
       ${r.note ? `<div class="note">”${esc(r.note)}”${r.decidedBy ? " – " + esc(r.decidedBy) : ""}</div>` : ""}</div>
     ${actions ? `<div class="act">${actions}</div>` : ""}
   </article>`;
@@ -745,7 +782,7 @@ function pilotFlight() {
   if (f) {
     return `<section class="block"><div class="panel hl"><h2>Du är på väg till ${esc(f.destination)}</h2>
       <p class="lead">${etaText(f.eta, d.now)}. ATC vid flygplatsen ser dig som ankommande flyg. Flyget avslutas när du har landat eller efter 3 timmar.</p>
-      <button class="btn" data-action="enroute-off">Jag har landat</button></div></section>`;
+      <button class="btn go" data-action="enroute-off">Jag har landat</button></div></section>`;
   }
   return `<section class="block"><div class="panel"><h2>Flyg på väg</h2>
     <p class="lead">${destAp ? "Låt ATC vid " + esc(destAp.name) + " se att du är på väg." : "Välj en av flygplatserna som destination under Ditt flyg och spara, så kan du anmäla att du är på väg dit."}</p>
@@ -764,7 +801,7 @@ function inboundStrip(f, { admin = false } = {}) {
     <div><div class="fl">${esc(f.flightNumber)}<span>${esc(f.airline)}</span></div>
       <div class="sub">${esc(f.username)}${admin ? " → " + esc(apName) : ""}</div></div>
     <div class="rw"><b>${q ? esc(q.runway) : "–"}</b><small>bana</small></div>
-    <div>${q ? `<span class="status ${q.status}">${STATUS[q.status]} · ${TYPE[q.type]}</span>` : `<span class="status cancelled">Ingen förfrågan än</span>`}
+    <div>${q ? `<span class="status ${q.status}">${statusLine(q)}</span>` : `<span class="status cancelled">Ingen förfrågan än</span>`}
       <div class="sub" style="margin-top:4px">${esc(etaText(f.eta, S.data.now))}</div></div>
     ${admin ? "" : `<div class="act"><button class="btn alt sm" data-action="acars-reply" data-to="${esc(f.username)}">Skriv ACARS</button><button class="btn alt sm" data-action="gate-pick" data-to="${esc(f.username)}">Tilldela gate</button></div>`}
   </article>`;
@@ -841,6 +878,79 @@ function adminGates() {
   return gatePanel(aps.find((x) => x.id === ui.adminAirport) || aps[0]);
 }
 
+/* --- Väder och tid på dygnet --- */
+function conditionsPanel() {
+  const d = S.data, me = S.me;
+  if (!ui.cond.touched) ui.cond.airports = me.role === "atc" && me.airport ? [me.airport] : [];
+  const sel = new Set(ui.cond.airports);
+  const pk = (action, map, cur, none) => `<div class="pk">${Object.entries(map).map(([k, v]) => `<button type="button" data-action="${action}" data-v="${k}" aria-pressed="${cur === k}">${esc(v)}</button>`).join("")}<button type="button" data-action="${action}" data-v="none" aria-pressed="${cur === "none"}">${none}</button></div>`;
+  const ready = sel.size && (ui.cond.weather || ui.cond.time);
+  return `<section class="block" id="conditions"><header><h2>Väder och tid på dygnet</h2><p>Välj en eller flera flygplatser</p></header>
+    <div class="panel"><form data-form="cond">
+      <span class="f" style="display:block;font-weight:700">Flygplatser</span>
+      <div class="pk">${d.airports.map((a) => `<button type="button" data-action="cond-ap" data-v="${esc(a.id)}" aria-pressed="${sel.has(a.id)}">${esc(a.name)}</button>`).join("")}
+        <button type="button" class="alt" data-action="cond-all">Välj alla</button><button type="button" class="alt" data-action="cond-none">Rensa val</button></div>
+      <span class="f" style="display:block;font-weight:700">Väder</span>
+      ${pk("cond-weather", WEATHER, ui.cond.weather, "Ta bort väder")}
+      <div class="field"><label class="f" for="cn">Kommentar till vädret (valfri)</label>
+        <input id="cn" type="text" maxlength="60" autocomplete="off" placeholder="till exempel Kraftig vind från väst" data-bind="cond.note" value="${esc(ui.cond.note)}"></div>
+      <span class="f" style="display:block;font-weight:700">Tid på dygnet</span>
+      ${pk("cond-time", TIMEOFDAY, ui.cond.time, "Ta bort tid")}
+      <button class="btn" type="submit" ${ready ? "" : "disabled"}>Rapportera för ${sel.size} ${sel.size === 1 ? "flygplats" : "flygplatser"}</button>
+      <p style="margin:8px 0 0;color:var(--ink-2)">Du kan rapportera bara väder, bara tid eller båda. Det syns på flygplatsernas kort för alla.</p>
+    </form></div></section>`;
+}
+
+/* --- Nödläge --- */
+function pilotEmergency() {
+  const d = S.data, me = S.me;
+  const e = (d.emergencies || []).find((x) => x.status !== "resolved");
+  if (e) {
+    return `<section class="block"><div class="sos"><span class="sos-badge">NÖDLÄGE</span><h2>${esc(e.kindLabel)}</h2>
+      <p>${esc(apNameOf(e.airport))}${e.runway ? ", bana " + esc(e.runway) : ""}${e.text ? ". " + esc(e.text) : ""}</p>
+      <p><b>${e.status === "help-sent" ? "Hjälp är på väg till bana " + esc(e.helpRunway) + " (" + esc(e.helpBy) + ")." : "ATC har fått larmet. Väntar på svar."}</b></p>
+      <button class="btn alt" data-action="emg-resolve" data-pilot="${esc(me.username)}">Nödläget är över</button></div></section>`;
+  }
+  if (!ui.emg.open) {
+    return `<section class="block"><div class="panel"><h2>Nödläge</h2>
+      <p class="lead" style="margin-bottom:10px">Har du ett akut problem? Anmäl det så larmas ATC och kan skicka hjälp till landningsbanan.</p>
+      <button class="btn stop" data-action="emg-open">Anmäl nödläge</button></div></section>`;
+  }
+  const act = d.requests.find((r) => ACTIVE.includes(r.status));
+  if (!ui.emg.airport) ui.emg.airport = (act && act.airport) || (d.myFlight && d.myFlight.airport) || "";
+  const ap = d.airports.find((a) => a.id === ui.emg.airport);
+  if (ap && !ap.runways.includes(ui.emg.runway)) ui.emg.runway = ap.runways.length === 1 ? ap.runways[0] : "";
+  const KINDS = { engine: "Motorproblem", fire: "Brand ombord", fuel: "Bränslebrist", medical: "Sjukdom ombord", gear: "Landningsställ", other: "Annat" };
+  const ok = ap && ui.emg.kind && (me.flightNumber && me.airline);
+  return `<section class="block"><div class="sos"><h2>Anmäl nödläge</h2>
+    <form data-form="emergency">
+      <div class="gate-form">
+        <div class="field"><label class="f" for="ea">Flygplats</label><select id="ea" data-bind="emg.airport"><option value="">Välj flygplats</option>${d.airports.map((a) => `<option value="${esc(a.id)}" ${a.id === ui.emg.airport ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></div>
+        <div class="field"><label class="f" for="er">Bana (valfri)</label><select id="er" data-bind="emg.runway"><option value="">Vet inte</option>${ap ? ap.runways.map((rw) => `<option value="${esc(rw)}" ${rw === ui.emg.runway ? "selected" : ""}>Bana ${esc(rw)}</option>`).join("") : ""}</select></div>
+        <div class="field"><label class="f" for="ek">Vad har hänt?</label><select id="ek" data-bind="emg.kind"><option value="">Välj typ</option>${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${k === ui.emg.kind ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      </div>
+      <div class="field"><label class="f" for="et">Beskriv kort (valfri)</label><input id="et" type="text" maxlength="140" autocomplete="off" placeholder="till exempel Motor 2 har stannat" data-bind="emg.text" value="${esc(ui.emg.text)}"></div>
+      <div class="row"><button class="btn stop" type="submit" ${ok ? "" : "disabled"}>Skicka nödlarm</button><button class="btn alt" type="button" data-action="emg-close">Avbryt</button></div>
+    </form></div></section>`;
+}
+
+function emergencyPanel() {
+  const d = S.data, list = (d.emergencies || []).filter((e) => e.status !== "resolved");
+  if (!list.length) return "";
+  return list.map((e) => {
+    const ap = d.airports.find((a) => a.id === e.airport);
+    const rw = ui.helpRw[e.pilot] || e.helpRunway || e.runway || (ap && ap.runways.length === 1 ? ap.runways[0] : "");
+    return `<section class="block"><div class="sos" role="alert"><span class="sos-badge">NÖDLÄGE</span>
+      <h2>${esc(e.flightNumber)} (${esc(e.airline)}): ${esc(e.kindLabel)}</h2>
+      <p>${esc(e.pilot)} vid ${esc(ap ? ap.name : e.airport)}${e.runway ? ", bana " + esc(e.runway) : ""}. Anmält kl ${clock(e.createdAt)}.${e.text ? " " + esc(e.text) : ""}</p>
+      ${e.status === "help-sent" ? `<p><b>Hjälp skickad till bana ${esc(e.helpRunway)} av ${esc(e.helpBy)} kl ${clock(e.helpAt)}.</b></p>` : ""}
+      <div class="row"><label class="f" for="hr-${esc(e.pilot)}" style="position:absolute;left:-9999px">Bana</label>
+        <select id="hr-${esc(e.pilot)}" data-bind="helpRw.${esc(e.pilot)}"><option value="">Välj bana</option>${(ap ? ap.runways : []).map((r) => `<option value="${esc(r)}" ${r === rw ? "selected" : ""}>Bana ${esc(r)}</option>`).join("")}</select>
+        <button class="btn stop sm" data-action="emg-help" data-pilot="${esc(e.pilot)}" ${rw ? "" : "disabled"}>${e.status === "help-sent" ? "Skicka hjälp igen" : "Skicka hjälp till banan"}</button>
+        <button class="btn alt sm" data-action="emg-resolve" data-pilot="${esc(e.pilot)}">Avsluta nödläge</button></div></div></section>`;
+  }).join("");
+}
+
 /* --- Flygplatsstatus (ATC på plats och admin) --- */
 function statusPanel(a, { picker = false } = {}) {
   const rwBtns = a.runways.map((rw) => {
@@ -907,10 +1017,11 @@ function pilotView() {
     const noAtc = aap && aap.atc.length === 0;
     activeBlock = `<section class="block"><header><h2>Din förfrågan</h2>
       <p>${active.status === "pending" ? (noAtc ? "Ingen ATC är på plats just nu. Förfrågan ligger kvar i 30 minuter." : "Väntar på svar från ATC.") : "Du har tillstånd. Följ ATC:s instruktioner."}</p></header>
-      <div class="strips">${strip(active, { actions: `<button class="btn alt sm" data-action="cancel" data-id="${esc(active.id)}">${active.status === "approved" ? "Avsluta tillstånd" : "Avbryt förfrågan"}</button>` })}</div></section>`;
+      <div class="strips">${strip(active, { actions: `${active.status === "approved" ? `<button class="btn go sm" data-action="pilot-done" data-id="${esc(active.id)}" data-type="${esc(active.type)}">${active.type === "landing" ? "Jag har landat" : "Jag har lyft"}</button>` : ""}<button class="btn alt sm" data-action="cancel" data-id="${esc(active.id)}">${active.status === "approved" ? "Avbryt " + (active.type === "landing" ? "landning" : "start") : "Avbryt förfrågan"}</button>` })}</div></section>`;
   }
 
   return `${homePanel()}
+  ${pilotEmergency()}
   ${pilotGate()}
   ${activeBlock}
   <section class="block"><div class="grid2">
@@ -940,6 +1051,7 @@ function pilotView() {
           </select>
           ${ap ? `<small>${ap.atc.length ? "ATC på plats: " + ap.atc.map(esc).join(", ") : "Ingen ATC är på plats just nu."}</small>` : ""}
           ${ap && ap.closed ? `<small style="color:var(--red);font-weight:700">Flygplatsen är stängd${ap.closedReason ? ": " + esc(ap.closedReason) : ""}. Du kan inte begära tillstånd här.</small>` : ""}
+          ${ap && (ap.weather || ap.tod) ? `<small>${[ap.weather && "Väder: " + ap.weather.label + (ap.weather.note ? " (" + ap.weather.note + ")" : ""), ap.tod && "Tid: " + ap.tod.label].filter(Boolean).map(esc).join(" · ")}</small>` : ""}
           ${ap && ap.notices.length ? `<ul class="notices" style="margin-top:8px">${ap.notices.map((n) => `<li>${esc(n.text)}</li>`).join("")}</ul>` : ""}</div>
         ${ap ? `<div class="field"><span class="f" style="display:block;font-weight:700;margin-bottom:6px">Bana</span><div class="rwy-pick">
           ${ap.runways.map((rw) => { const st = ap.runwayStatus[rw], shut = ap.runwayClosed[rw]; return `<button type="button" class="rwy ${shut ? "shut" : st ? "busy" : ""} ${ui.pilot.runway === rw ? "sel" : ""}" data-action="pick-runway" data-v="${esc(rw)}" aria-pressed="${ui.pilot.runway === rw}" title="${shut ? esc("Stängd" + (shut.reason ? ": " + shut.reason : "")) : ""}" ${locked || shut ? "disabled" : ""}><b>${esc(rw)}</b><small>${shut ? "Stängd" : st ? "Upptagen" : "Ledig"}</small></button>`; }).join("")}
@@ -983,12 +1095,14 @@ function atcView() {
     ${r.type === "landing" ? `<div class="row"><button class="btn alt sm" data-action="gate-pick" data-to="${esc(r.pilot)}">Tilldela gate</button></div>` : ""}`;
 
   return `${homePanel()}
+  ${emergencyPanel()}
   ${duty}
   <section class="block"><header><h2>Banor vid ${esc(myAp.name)}</h2></header>
     <div class="aps">${airportCard(myAp, false)}</div></section>
   ${inboundSection()}
   ${gatePanel(myAp, { assign: true })}
   ${statusPanel(myAp)}
+  ${conditionsPanel()}
   <section class="block"><header><h2>Väntande förfrågningar</h2><p>Äldst först.</p></header>
     ${pending.length ? `<div class="strips">${pending.map((r) => strip(r, { showPilot: true, actions: pendingActions(r) })).join("")}</div>` : empty("Inga väntande förfrågningar just nu.")}</section>
   <section class="block"><header><h2>Pågående tillstånd</h2></header>
@@ -1022,10 +1136,12 @@ function adminView() {
 
   return `${ui.activityOpen ? activityPanel() : ""}
   ${homePanel()}
+  ${emergencyPanel()}
   <section class="block"><header><h2>Konton som väntar</h2><p>${pend.length} ${pend.length === 1 ? "konto" : "konton"}</p></header>${pendCards}</section>
   <section class="block"><header><h2>Alla konton</h2></header>
     ${users.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Användare</th><th>Typ</th><th>Status</th><th>Uppgifter</th><th>Åtgärder</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Det finns inga konton än.")}</section>
   ${adminStatus()}
+  ${conditionsPanel()}
   ${adminGates()}
   ${inboundSection({ admin: true })}
   <section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>
@@ -1046,7 +1162,8 @@ document.addEventListener("change", (e) => {
   setPath(ui, b, t.value);
   if (b === "pilot.airport") { ui.pilot.runway = ""; render(); }
   else if (b === "gate.terminal") { ui.gate.gate = ""; render(); }
-  else if (b === "atcAirport" || b === "reg.role" || b === "adminAirport" || b === "activityFilter" || b === "gate.pilot" || b === "gate.gate") render();
+  else if (b === "atcAirport" || b === "reg.role" || b === "adminAirport" || b === "activityFilter" || b === "gate.pilot" || b === "gate.gate" || b === "emg.runway" || b === "emg.kind" || b.startsWith("helpRw.")) render();
+  else if (b === "emg.airport") { ui.emg.runway = ""; render(); }
 });
 
 async function call(path, body, okMsg) {
@@ -1092,6 +1209,20 @@ document.addEventListener("submit", async (e) => {
       await api("airports/" + encodeURIComponent(e.target.dataset.ap) + "/gate-assign", { method: "POST", body: { pilot: ui.gate.pilot, terminal: ui.gate.terminal, gate: ui.gate.gate } });
       ui.gate.pilot = ""; ui.gate.gate = "";
       toast("Gaten är tilldelad.", "ok");
+      await refresh(true);
+    } else if (f === "cond") {
+      const body = { airports: ui.cond.airports, note: ui.cond.note };
+      if (ui.cond.weather) body.weather = ui.cond.weather === "none" ? null : ui.cond.weather;
+      if (ui.cond.time) body.time = ui.cond.time === "none" ? null : ui.cond.time;
+      const r = await api("conditions", { method: "POST", body });
+      ui.cond.weather = ""; ui.cond.time = ""; ui.cond.note = "";
+      toast("Rapporterat för " + r.airports + (r.airports === 1 ? " flygplats." : " flygplatser."), "ok");
+      await refresh(true);
+    } else if (f === "emergency") {
+      if (!confirm("Anmäla nödläge? ATC får ett larm direkt.")) return;
+      await api("emergency", { method: "POST", body: { airport: ui.emg.airport, runway: ui.emg.runway, kind: ui.emg.kind, text: ui.emg.text } });
+      ui.emg = { open: false, airport: "", runway: "", kind: "", text: "" };
+      toast("Nödlarmet är skickat till ATC.", "ok");
       await refresh(true);
     } else if (f === "announce") {
       await api("announcements", { method: "POST", body: { audience: ui.ann.audience, text: ui.ann.text } });
@@ -1170,7 +1301,34 @@ document.addEventListener("click", async (e) => {
     }
     else if (a === "enroute-off") {
       el.disabled = true;
-      await call("enroute", { active: false }, "Flygningen är avslutad.");
+      const r = await api("enroute", { method: "POST", body: { active: false, landed: true } });
+      toast(r.request ? "Lyckad landning!" : "Flygningen är avslutad.", "ok");
+      await refresh(true);
+    }
+    else if (a === "pilot-done") {
+      el.disabled = true;
+      await call("requests/" + encodeURIComponent(el.dataset.id) + "/done", {}, el.dataset.type === "landing" ? "Lyckad landning!" : "Lyckad start!");
+    }
+    else if (a === "cond-ap") {
+      const id = el.dataset.v, set = new Set(ui.cond.airports);
+      set.has(id) ? set.delete(id) : set.add(id);
+      ui.cond.airports = [...set]; ui.cond.touched = true; render();
+    }
+    else if (a === "cond-all") { ui.cond.airports = S.data.airports.map((x) => x.id); ui.cond.touched = true; render(); }
+    else if (a === "cond-none") { ui.cond.airports = []; ui.cond.touched = true; render(); }
+    else if (a === "cond-weather") { ui.cond.weather = ui.cond.weather === el.dataset.v ? "" : el.dataset.v; render(); }
+    else if (a === "cond-time") { ui.cond.time = ui.cond.time === el.dataset.v ? "" : el.dataset.v; render(); }
+    else if (a === "emg-open") { ui.emg.open = true; render(); }
+    else if (a === "emg-close") { ui.emg = { open: false, airport: "", runway: "", kind: "", text: "" }; render(); }
+    else if (a === "emg-help") {
+      el.disabled = true;
+      const p = el.dataset.pilot, e = (S.data.emergencies || []).find((x) => x.pilot === p);
+      const rw = ui.helpRw[p] || (e && (e.helpRunway || e.runway)) || "";
+      await call("emergency/" + encodeURIComponent(p) + "/help", { runway: rw }, "Hjälp är skickad till bana " + rw + ".");
+    }
+    else if (a === "emg-resolve") {
+      el.disabled = true;
+      await call("emergency/" + encodeURIComponent(el.dataset.pilot) + "/resolve", {}, "Nödläget är avslutat.");
     }
     else if (a === "acars-tpl") {
       ui.acars.text = el.dataset.v; render();
