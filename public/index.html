@@ -5,17 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EDU Flygledning</title>
 <meta name="description" content="Flygledning för Minecraft-servern EDU: begär tillstånd att landa och lyfta, och styr trafiken som ATC.">
+<script>
+/* Välj ljust eller mörkt läge innan sidan målas: sparat val först, annars enhetens inställning */
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("edu_theme"); } catch (e) {}
+  if (t !== "light" && t !== "dark") {
+    try { t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch (e) { t = "light"; }
+  }
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sofia+Sans+Condensed:wght@500;700;900&family=Sofia+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --apron:#cfd2cb;
-  --apron-2:#bfc3bb;
-  --ink:#1d2229;
-  --ink-2:#4b535e;
-  --paper:#f7f5ee;
-  --paper-2:#ecE9df;
+  color-scheme:light;
+  --apron:#cfd2cb;      /* sidans bakgrund */
+  --apron-2:#bfc3bb;    /* hover på ytor */
+  --ink:#1d2229;        /* text */
+  --ink-2:#4b535e;      /* dämpad text */
+  --ink-hover:#000;     /* hover på fyllda knappar */
+  --line:#1d2229;       /* ramar */
+  --dash:#b3b0a3;       /* streckade avdelare */
+  --rule:#c9c6ba;       /* tunna linjer */
+  --paper:#f7f5ee;      /* paneler (och text på fyllda ytor) */
+  --paper-2:#ece9df;
+  --field:#fff;         /* inmatningsfält */
+  --tint:#fff3c4;       /* gul information */
+  --tint-red:#fbefee;   /* stängd flygplats */
+  --slip:#fffef6;       /* ACARS-utskrift */
+  --bar:#1d2229;        /* topprad och tabellhuvud */
+  --bar-fg:#f7f5ee;
+  --tile:#1d2229;       /* banor och gater */
+  --on-yellow:#1d2229;  /* text på gult */
   --yellow:#f0b90b;
   --green:#1f9d6b;
   --red:#d6403a;
@@ -23,6 +47,28 @@
   --grey:#8a9099;
   --display:"Sofia Sans Condensed","Arial Narrow",system-ui,sans-serif;
   --body:"Sofia Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --apron:#12161b;
+  --apron-2:#262e38;
+  --ink:#e8e6df;
+  --ink-2:#a4adb9;
+  --ink-hover:#fff;
+  --line:#5a6574;
+  --dash:#414a56;
+  --rule:#2f3741;
+  --paper:#1c222a;
+  --paper-2:#252d37;
+  --field:#10141a;
+  --tint:#3b3417;
+  --tint-red:#3a1f21;
+  --slip:#171c23;
+  --bar:#0c0f13;
+  --bar-fg:#f1efe8;
+  --tile:#2b3440;
+  --blue:#5b9bd5;
+  --grey:#7f8893;
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -35,14 +81,14 @@ p{margin:0}
 :focus-visible{outline:3px solid var(--blue);outline-offset:2px}
 
 /* Top bar */
-.bar{background:var(--ink);color:var(--paper);border-bottom:6px solid var(--yellow)}
+.bar{background:var(--bar);color:var(--bar-fg);border-bottom:6px solid var(--yellow)}
 .bar-in{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:12px;margin-right:auto}
 .brand svg{flex:none}
 .brand b{font-family:var(--display);font-weight:900;font-size:1.6rem;letter-spacing:.01em}
 .brand small{display:block;color:#aeb6c2;font-size:.85rem;margin-top:-2px}
 .who{display:flex;align-items:center;gap:10px;font-weight:500}
-.who .role{background:var(--yellow);color:var(--ink);font-family:var(--display);font-weight:700;padding:1px 9px;border-radius:3px}
+.who .role{background:var(--yellow);color:var(--on-yellow);font-family:var(--display);font-weight:700;padding:1px 9px;border-radius:3px}
 .offline{background:var(--red);color:#fff;padding:2px 9px;border-radius:3px;font-weight:700;font-size:.9rem}
 
 main{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
@@ -52,9 +98,9 @@ section.block>header p{color:var(--ink-2)}
 
 /* Buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:4px;font-weight:700;cursor:pointer;min-height:42px}
-.btn:hover:not(:disabled){background:#000}
+.btn:hover:not(:disabled){background:var(--ink-hover)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-.btn.alt{background:transparent;color:var(--ink)}
+.btn.alt{background:transparent;color:var(--ink);border-color:var(--line)}
 .btn.alt:hover:not(:disabled){background:var(--apron-2)}
 .btn.go{background:var(--green);border-color:var(--green);color:#fff}
 .btn.go:hover:not(:disabled){background:#17805a}
@@ -63,7 +109,7 @@ section.block>header p{color:var(--ink-2)}
 .btn.sm{min-height:34px;padding:5px 11px;font-size:.92rem}
 
 /* Panels and forms */
-.panel{background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:20px}
+.panel{background:var(--paper);border:2px solid var(--line);border-radius:6px;padding:20px}
 .panel.hl{box-shadow:0 0 0 4px var(--yellow)}
 .panel h2{margin-bottom:4px}
 .panel .lead{color:var(--ink-2);margin-bottom:14px}
@@ -72,32 +118,32 @@ section.block>header p{color:var(--ink-2)}
 label.f{display:block;font-weight:700;margin-bottom:4px}
 .field{margin-bottom:14px}
 .field small{display:block;color:var(--ink-2);margin-top:3px}
-input[type=text],input[type=password],select,textarea{width:100%;background:#fff;border:2px solid var(--ink);border-radius:4px;padding:9px 11px;min-height:44px}
+input[type=text],input[type=password],select,textarea{width:100%;background:var(--field);border:2px solid var(--line);border-radius:4px;padding:9px 11px;min-height:44px}
 textarea{min-height:92px;resize:vertical;line-height:1.4}
 input::placeholder{color:#8b929c}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 
 /* Auth */
 .auth{max-width:460px;margin:28px auto 0}
-.tabs{display:flex;border:2px solid var(--ink);border-radius:6px 6px 0 0;overflow:hidden;background:var(--ink)}
+.tabs{display:flex;border:2px solid var(--line);border-radius:6px 6px 0 0;overflow:hidden;background:var(--bar)}
 .tabs button{flex:1;border:0;background:transparent;color:#c5ccd6;padding:12px;font-family:var(--display);font-weight:700;font-size:1.2rem;cursor:pointer}
 .tabs button.on{background:var(--paper);color:var(--ink)}
 .auth .panel{border-radius:0 0 6px 6px;border-top:0}
 .roles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .role-opt{position:relative}
 .role-opt input{position:absolute;opacity:0;inset:0;cursor:pointer}
-.role-opt span{display:block;border:2px solid var(--ink);border-radius:4px;padding:10px 12px;background:#fff}
+.role-opt span{display:block;border:2px solid var(--line);border-radius:4px;padding:10px 12px;background:var(--field)}
 .role-opt span b{display:block;font-family:var(--display);font-size:1.25rem}
 .role-opt span small{color:var(--ink-2)}
-.role-opt input:checked+span{background:var(--yellow)}
-.role-opt input:checked+span small{color:var(--ink)}
+.role-opt input:checked+span{background:var(--yellow);color:var(--on-yellow)}
+.role-opt input:checked+span small{color:var(--on-yellow)}
 .role-opt input:focus-visible+span{outline:3px solid var(--blue);outline-offset:2px}
 .notice{background:var(--paper-2);border-left:6px solid var(--yellow);padding:10px 12px;margin-bottom:14px}
 .notice.ok{border-color:var(--green)}
 
 /* Runway designators */
 .rwy-pick{display:flex;gap:8px;flex-wrap:wrap}
-.rwy{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:64px;padding:6px 10px;background:var(--ink);color:#fff;border:2px solid var(--ink);border-radius:3px;font-family:var(--display);line-height:1;position:relative}
+.rwy{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:64px;padding:6px 10px;background:var(--tile);color:#fff;border:2px solid var(--tile);border-radius:3px;font-family:var(--display);line-height:1;position:relative}
 .rwy b{font-size:1.6rem;font-weight:900}
 .rwy small{font-family:var(--body);font-size:.72rem;margin-top:3px;color:#c9d0da}
 .rwy.busy{background:repeating-linear-gradient(135deg,#7d1f1b 0 7px,var(--red) 7px 14px);border-color:#7d1f1b}
@@ -106,14 +152,14 @@ button.rwy{cursor:pointer}
 button.rwy.sel{outline:4px solid var(--yellow);outline-offset:2px}
 button.rwy:hover{filter:brightness(1.2)}
 
-.seg{display:inline-flex;border:2px solid var(--ink);border-radius:4px;overflow:hidden}
-.seg button{border:0;background:#fff;padding:9px 18px;font-weight:700;cursor:pointer;min-height:42px}
-.seg button+button{border-left:2px solid var(--ink)}
+.seg{display:inline-flex;border:2px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{border:0;background:var(--field);padding:9px 18px;font-weight:700;cursor:pointer;min-height:42px}
+.seg button+button{border-left:2px solid var(--line)}
 .seg button.on{background:var(--ink);color:var(--paper)}
 
 /* Airports */
 .aps{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.ap{background:var(--paper);border:2px solid var(--ink);border-radius:6px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.ap{background:var(--paper);border:2px solid var(--line);border-radius:6px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
 .ap header{display:flex;flex-direction:column;gap:6px}
 .ap h3{font-size:1.25rem}
 .ap .atc{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:.92rem}
@@ -126,8 +172,8 @@ button.rwy:hover{filter:brightness(1.2)}
 
 /* Flight strips */
 .strips{display:flex;flex-direction:column;gap:8px}
-.strip{display:grid;grid-template-columns:70px minmax(0,1.6fr) 74px minmax(0,1.2fr) auto;align-items:stretch;background:var(--paper);border:2px solid var(--ink);border-left-width:14px;border-radius:3px}
-.strip>div{padding:9px 12px;border-left:2px dashed #b3b0a3;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.strip{display:grid;grid-template-columns:70px minmax(0,1.6fr) 74px minmax(0,1.2fr) auto;align-items:stretch;background:var(--paper);border:2px solid var(--line);border-left-width:14px;border-radius:3px}
+.strip>div{padding:9px 12px;border-left:2px dashed var(--dash);display:flex;flex-direction:column;justify-content:center;min-width:0}
 .strip>div:first-child{border-left:0}
 .strip.s-inbound{border-left-color:var(--blue)}
 .strip.s-pending{border-left-color:var(--yellow)}
@@ -145,7 +191,7 @@ button.rwy:hover{filter:brightness(1.2)}
 .strip .rw b{font-family:var(--display);font-weight:900;font-size:1.9rem;line-height:1}
 .strip .rw small{color:var(--ink-2);font-size:.78rem}
 .status{display:inline-block;align-self:flex-start;font-weight:700;font-size:.88rem;padding:1px 9px;border-radius:3px;color:#fff}
-.status.pending{background:var(--yellow);color:var(--ink)}
+.status.pending{background:var(--yellow);color:var(--on-yellow)}
 .status.approved{background:var(--green)}
 .status.denied{background:var(--red)}
 .status.completed{background:var(--blue)}
@@ -154,32 +200,32 @@ button.rwy:hover{filter:brightness(1.2)}
 .strip .act{gap:6px;align-items:stretch;min-width:210px}
 .strip .act input{min-height:36px;padding:5px 9px}
 .strip .act .row{flex-wrap:nowrap}
-.typ{display:inline-block;font-family:var(--display);font-weight:700;font-size:.95rem;padding:0 7px;border:2px solid var(--ink);border-radius:3px;margin-left:8px;vertical-align:2px}
+.typ{display:inline-block;font-family:var(--display);font-weight:700;font-size:.95rem;padding:0 7px;border:2px solid var(--line);border-radius:3px;margin-left:8px;vertical-align:2px}
 @media(max-width:820px){
   .strip{grid-template-columns:62px 1fr 64px}
-  .strip>div:nth-child(4){grid-column:1/-1;border-left:0;border-top:2px dashed #b3b0a3}
-  .strip>.act{grid-column:1/-1;border-left:0;border-top:2px dashed #b3b0a3}
+  .strip>div:nth-child(4){grid-column:1/-1;border-left:0;border-top:2px dashed var(--dash)}
+  .strip>.act{grid-column:1/-1;border-left:0;border-top:2px dashed var(--dash)}
 }
 .empty{background:var(--paper-2);border:2px dashed var(--grey);border-radius:6px;padding:18px;color:var(--ink-2)}
 
 /* Admin table */
-.tbl{width:100%;border-collapse:collapse;background:var(--paper);border:2px solid var(--ink)}
-.tbl th,.tbl td{text-align:left;padding:9px 12px;border-bottom:1px solid #c9c6ba;vertical-align:middle}
-.tbl th{background:var(--ink);color:var(--paper);font-family:var(--display);font-size:1.05rem;font-weight:700}
+.tbl{width:100%;border-collapse:collapse;background:var(--paper);border:2px solid var(--line)}
+.tbl th,.tbl td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);vertical-align:middle}
+.tbl th{background:var(--bar);color:var(--bar-fg);font-family:var(--display);font-size:1.05rem;font-weight:700}
 .tbl .acts{display:flex;gap:6px;flex-wrap:wrap}
 .scroll{overflow-x:auto}
-.pillrole{font-family:var(--display);font-weight:700;border:2px solid var(--ink);border-radius:3px;padding:0 7px}
+.pillrole{font-family:var(--display);font-weight:700;border:2px solid var(--line);border-radius:3px;padding:0 7px}
 
 /* Knappar i den mörka toppraden */
-.btn.onbar{color:var(--paper);border-color:var(--paper)}
-.btn.onbar:hover:not(:disabled){background:#3a414c}
-.btn.onbar.on,.btn.onbar.on:hover:not(:disabled){background:var(--yellow);color:var(--ink);border-color:var(--yellow)}
+.btn.onbar,.btn.alt.onbar{color:var(--bar-fg);border-color:var(--bar-fg)}
+.btn.onbar:hover:not(:disabled),.btn.alt.onbar:hover:not(:disabled){background:#3a414c}
+.btn.onbar.on,.btn.onbar.on:hover:not(:disabled){background:var(--yellow);color:var(--on-yellow);border-color:var(--yellow)}
 
 /* Välkomstpanel och information på startsidan */
 .home h3{margin:16px 0 8px}
 .ann-list{display:flex;flex-direction:column;gap:10px}
 .ann{background:var(--paper-2);border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px}
-.ann.admin{border-left-color:var(--yellow);background:#fff3c4}
+.ann.admin{border-left-color:var(--yellow);background:var(--tint)}
 .ann .hd{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;color:var(--ink-2);font-size:.9rem;margin-bottom:4px}
 .ann .hd b{color:var(--ink)}
 .ann .tx{overflow-wrap:anywhere}
@@ -190,22 +236,37 @@ button.rwy:hover{filter:brightness(1.2)}
 @media(max-width:820px){.act-grid{grid-template-columns:1fr}}
 .act-col>h3{margin-bottom:8px}
 .act-scroll{display:flex;flex-direction:column;gap:8px;max-height:560px;overflow:auto;padding:2px}
-.person{background:var(--paper);border:2px solid var(--ink);border-radius:4px;padding:9px 12px}
-.person.off{background:var(--paper-2);border-color:#9a9788}
+.person{background:var(--paper);border:2px solid var(--line);border-radius:4px;padding:9px 12px}
+.person.off{background:var(--paper-2);border-color:var(--grey)}
 .person .ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .person .seen{margin-left:auto;color:var(--ink-2);font-size:.88rem}
 .person .pd{margin-top:3px;color:var(--ink-2);overflow-wrap:anywhere}
 .dot{width:11px;height:11px;border-radius:50%;background:var(--grey);display:inline-block;flex:none}
 .dot.on{background:var(--green);box-shadow:0 0 0 3px #1f9d6b33}
 .events{list-style:none;margin:0;padding:2px;display:flex;flex-direction:column;gap:6px;max-height:560px;overflow:auto}
-.ev{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;background:var(--paper);border:1px solid #bdb9a8;border-left:6px solid var(--blue);padding:6px 10px;border-radius:3px}
+.ev{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;background:var(--paper);border:1px solid var(--rule);border-left:6px solid var(--blue);padding:6px 10px;border-radius:3px}
 .ev.atc{border-left-color:var(--yellow)}
-.ev.admin{border-left-color:var(--ink)}
+.ev.admin{border-left-color:var(--ink-2)}
 .ev .et{color:var(--ink-2);font-size:.85rem}
 .ev .tx{overflow-wrap:anywhere}
 
+/* Gater och terminaler */
+.terminal+.terminal{margin-top:14px}
+.terminal h3{margin-bottom:6px}
+.gts{display:flex;gap:8px;flex-wrap:wrap}
+.gt{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:66px;padding:6px 9px;background:var(--field);color:var(--ink);border:2px solid var(--line);border-radius:3px;font-family:var(--display);line-height:1}
+.gt b{font-size:1.35rem;font-weight:900}
+.gt small{font-family:var(--body);font-size:.72rem;margin-top:3px;color:var(--ink-2)}
+.gt.busy{background:var(--tint-red);border-color:var(--red)}
+.gt.busy small{color:var(--ink);font-weight:700}
+.gate-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 12px}
+.gate-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.gate-list li{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--paper-2);border-left:6px solid var(--red);padding:6px 10px}
+.gate-list li span{overflow-wrap:anywhere}
+.gate-big{font-family:var(--display);font-weight:900;font-size:2.4rem;line-height:1}
+
 /* Stängda flygplatser och banor, information */
-.ap.closed{border-color:var(--red);background:#fbefee}
+.ap.closed{border-color:var(--red);background:var(--tint-red)}
 .closed-banner{background:var(--red);color:#fff;padding:7px 10px;border-radius:3px;display:flex;flex-direction:column;gap:2px;font-weight:500}
 .closed-banner b{font-family:var(--display);font-size:1.2rem}
 .rwy.shut{border-color:#2b2f36;background:linear-gradient(to top right,transparent calc(50% - 2px),var(--yellow) calc(50% - 2px),var(--yellow) calc(50% + 2px),transparent calc(50% + 2px)),linear-gradient(to bottom right,transparent calc(50% - 2px),var(--yellow) calc(50% - 2px),var(--yellow) calc(50% + 2px),transparent calc(50% + 2px)),#2b2f36}
@@ -214,9 +275,9 @@ button.rwy:disabled{opacity:.55;cursor:not-allowed}
 button.rwy.tg:hover{filter:brightness(1.25)}
 .rw-reasons,.notices{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:.93rem}
 .rw-reasons li{color:var(--red);font-weight:700}
-.notices li{background:#fff3c4;border-left:6px solid var(--yellow);padding:4px 9px}
+.notices li{background:var(--tint);border-left:6px solid var(--yellow);padding:4px 9px}
 .notice-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
-.notice-list li{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#fff3c4;border-left:6px solid var(--yellow);padding:6px 10px}
+.notice-list li{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--tint);border-left:6px solid var(--yellow);padding:6px 10px}
 .notice-list li span{overflow-wrap:anywhere}
 
 /* ACARS: utskrifter som från cockpitskrivaren */
@@ -224,18 +285,18 @@ button.rwy.tg:hover{filter:brightness(1.25)}
 .acars-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:20px;align-items:start}
 @media(max-width:820px){.acars-grid{grid-template-columns:1fr}}
 .tpl{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-.tpl button{border:2px solid var(--ink);background:#fff;border-radius:3px;padding:4px 10px;font-weight:500;cursor:pointer;font-size:.92rem}
-.tpl button:hover{background:var(--yellow)}
+.tpl button{border:2px solid var(--line);background:var(--field);border-radius:3px;padding:4px 10px;font-weight:500;cursor:pointer;font-size:.92rem}
+.tpl button:hover{background:var(--yellow);color:var(--on-yellow)}
 .slip-list{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto;padding:2px}
-.slip{background:#fffef6;border:1px solid #bdb9a8;border-left:8px solid var(--blue);padding:10px 12px;font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;box-shadow:0 1px 0 #0002}
+.slip{background:var(--slip);border:1px solid var(--rule);border-left:8px solid var(--blue);padding:10px 12px;font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;box-shadow:0 1px 0 #0002}
 .slip.atc{border-left-color:var(--yellow)}
-.slip .hd{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;color:var(--ink-2);font-size:.8rem;border-bottom:1px dashed #b3b0a3;padding-bottom:5px;margin-bottom:6px}
+.slip .hd{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;color:var(--ink-2);font-size:.8rem;border-bottom:1px dashed var(--dash);padding-bottom:5px;margin-bottom:6px}
 .slip .tx{overflow-wrap:anywhere}
 .slip .sa{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
 
 /* Toasts */
 #toasts{position:fixed;left:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(380px,calc(100vw - 32px))}
-.toast{background:var(--ink);color:#fff;border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px;font-weight:500;box-shadow:0 6px 20px #0004}
+.toast{background:var(--bar);color:var(--bar-fg);border:1px solid var(--line);border-left:8px solid var(--blue);padding:10px 14px;border-radius:3px;font-weight:500;box-shadow:0 6px 20px #0004}
 .toast.ok{border-color:var(--green)}
 .toast.err{border-color:var(--red)}
 
@@ -261,7 +322,7 @@ const ROLE = { pilot: "Pilot", atc: "ATC", admin: "Admin" };
 const POLL_MS = 8000;
 
 /* ---------- Tillstånd ---------- */
-const S = { token: null, me: null, data: null, users: null, activity: null, sig: "", offline: false, booting: true, knownMsgs: null, knownAnns: null };
+const S = { token: null, me: null, data: null, users: null, activity: null, sig: "", offline: false, booting: true, knownMsgs: null, knownAnns: null, knownGate: undefined };
 const ui = {
   tab: "login",
   login: { username: "", password: "" },
@@ -276,6 +337,7 @@ const ui = {
   enroute: { eta: "" },
   adminAirport: "",
   ann: { audience: "", text: "" },
+  gate: { pilot: "", terminal: "", gate: "" },
   activityOpen: false,
   activityFilter: "all",
   regDone: false,
@@ -327,7 +389,8 @@ function toast(msg, kind = "info") {
 }
 
 function forceLogout(msg) {
-  S.token = null; S.me = null; S.data = null; S.users = null; S.activity = null; S.sig = ""; S.knownMsgs = null; S.knownAnns = null; ui.profileInit = false;
+  S.token = null; S.me = null; S.data = null; S.users = null; S.activity = null; S.sig = ""; S.knownMsgs = null; S.knownAnns = null; S.knownGate = undefined; ui.profileInit = false;
+  ui.gate = { pilot: "", terminal: "", gate: "" };
   ui.acars = { airport: "", to: "", text: "" };
   ui.ann = { audience: "", text: "" };
   ui.activityOpen = false;
@@ -369,6 +432,12 @@ async function refresh(force) {
         }
       }
       S.knownAnns = new Set(anns.map((n) => n.id));
+
+      const mg = data.myGate;
+      const gk = mg ? mg.airport + "/" + mg.gate : null;
+      if (S.knownGate !== undefined && gk && gk !== S.knownGate)
+        toast("Du har fått Gate " + mg.gate + ", " + mg.terminalName + " vid " + ((data.airports.find((a) => a.id === mg.airport) || {}).name || mg.airport) + ".", "ok");
+      S.knownGate = gk;
     }
     if (!ui.profileInit) {
       ui.profile = { flightNumber: S.me.flightNumber || "", airline: S.me.airline || "", destination: S.me.destination || "" };
@@ -414,10 +483,18 @@ function view() {
   return shell(body, true);
 }
 
+const curTheme = () => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+function setTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem("edu_theme", t); } catch (e) {}
+}
+
 function shell(body, loggedIn) {
+  const dark = curTheme() === "dark";
   return `<div class="bar"><div class="bar-in">
     <div class="brand">${logo}<div><b>EDU Flygledning</b><small>Landnings- och starttillstånd på EDU</small></div></div>
     ${S.offline ? `<span class="offline">Ingen anslutning</span>` : ""}
+    <button class="btn alt sm onbar" data-action="theme-toggle" aria-label="${dark ? "Byt till ljust läge" : "Byt till mörkt läge"}">${dark ? "Ljust läge" : "Mörkt läge"}</button>
     ${loggedIn ? `<div class="who"><span>${esc(S.me.username)}</span><span class="role">${ROLE[S.me.role]}</span>
       ${S.me.role === "admin" ? `<button class="btn alt sm onbar ${ui.activityOpen ? "on" : ""}" data-action="activity-toggle" aria-pressed="${ui.activityOpen}">${ui.activityOpen ? "Dölj aktivitet" : "Se Aktivitet"}</button>` : ""}
       <button class="btn alt sm onbar" data-action="logout">Logga ut</button></div>` : ""}
@@ -473,6 +550,10 @@ function runwayBlock(rw, st, shut) {
 function airportCard(a, mine) {
   const on = a.atc.length > 0;
   const shutList = a.runways.filter((rw) => a.runwayClosed[rw]);
+  const foot = [
+    a.gatesTotal ? "Lediga gater: " + a.gatesFree + " av " + a.gatesTotal : "",
+    a.pending ? a.pending + " " + (a.pending === 1 ? "väntande förfrågan" : "väntande förfrågningar") : "",
+  ].filter(Boolean);
   return `<article class="ap ${a.closed ? "closed" : ""} ${mine ? "mine" : ""}">
     <header><h3>${esc(a.name)}</h3>
       <span class="atc ${on ? "on" : "off"}"><i></i>${on ? "ATC på plats: " + a.atc.map(esc).join(", ") : "Ingen ATC på plats"}</span></header>
@@ -480,7 +561,7 @@ function airportCard(a, mine) {
     <div class="rwys">${a.runways.map((rw) => runwayBlock(rw, a.runwayStatus[rw], a.runwayClosed[rw])).join("")}</div>
     ${shutList.length ? `<ul class="rw-reasons">${shutList.map((rw) => `<li>Bana ${esc(rw)} är stängd${a.runwayClosed[rw].reason ? ": " + esc(a.runwayClosed[rw].reason) : ""}</li>`).join("")}</ul>` : ""}
     ${a.notices.length ? `<ul class="notices">${a.notices.map((n) => `<li>${esc(n.text)}</li>`).join("")}</ul>` : ""}
-    ${a.pending ? `<footer>${a.pending} ${a.pending === 1 ? "väntande förfrågan" : "väntande förfrågningar"}</footer>` : ""}
+    ${foot.length ? `<footer>${foot.map(esc).join("<br>")}</footer>` : ""}
   </article>`;
 }
 const airportGrid = (mineId) => `<div class="aps">${S.data.airports.map((a) => airportCard(a, a.id === mineId)).join("")}</div>`;
@@ -685,7 +766,7 @@ function inboundStrip(f, { admin = false } = {}) {
     <div class="rw"><b>${q ? esc(q.runway) : "–"}</b><small>bana</small></div>
     <div>${q ? `<span class="status ${q.status}">${STATUS[q.status]} · ${TYPE[q.type]}</span>` : `<span class="status cancelled">Ingen förfrågan än</span>`}
       <div class="sub" style="margin-top:4px">${esc(etaText(f.eta, S.data.now))}</div></div>
-    ${admin ? "" : `<div class="act"><button class="btn alt sm" data-action="acars-reply" data-to="${esc(f.username)}">Skriv ACARS</button></div>`}
+    ${admin ? "" : `<div class="act"><button class="btn alt sm" data-action="acars-reply" data-to="${esc(f.username)}">Skriv ACARS</button><button class="btn alt sm" data-action="gate-pick" data-to="${esc(f.username)}">Tilldela gate</button></div>`}
   </article>`;
 }
 
@@ -693,6 +774,71 @@ function inboundSection({ admin = false } = {}) {
   const list = S.data.inbound || [];
   return `<section class="block"><header><h2>${admin ? "Flyg på väg" : "Ankommande flyg"}</h2><p>${admin ? "Alla flyg som är anmälda på väg till en flygplats." : "Piloter som har anmält att de är på väg till din flygplats. Närmast först."}</p></header>
     ${list.length ? `<div class="strips">${list.map((f) => inboundStrip(f, { admin })).join("")}</div>` : empty(admin ? "Inga flyg är anmälda på väg just nu." : "Inga flyg är anmälda på väg hit just nu. Piloter anmäler det under Flyg på väg när de har valt din flygplats som destination.")}</section>`;
+}
+
+/* --- Gater och terminaler --- */
+function pilotGate() {
+  const g = S.data.myGate;
+  if (!g) {
+    return `<section class="block"><div class="panel"><h2>Gate</h2>
+      <p class="lead" style="margin:0">Du har ingen gate än. ATC vid flygplatsen väljer en ledig gate och terminal åt dig, och den visas här.</p></div></section>`;
+  }
+  return `<section class="block"><div class="panel hl"><h2>Din gate</h2>
+    <p class="gate-big">Gate ${esc(g.gate)}</p>
+    <p class="lead" style="margin:6px 0 14px">${esc(g.terminalName)} vid ${esc(apNameOf(g.airport))}. Tilldelad kl ${clock(g.since)}.</p>
+    <button class="btn alt" data-action="gate-leave">Jag har lämnat gaten</button></div></section>`;
+}
+
+function gatePanel(a, { assign = false } = {}) {
+  const d = S.data;
+  const terms = a.terminals || [];
+  if (!terms.length) return "";
+  const taken = terms.flatMap((t) => t.gates.filter((g) => g.occupied).map((g) => ({ g, t })));
+  const who = (o) => [o.flightNumber ? o.flightNumber + (o.airline ? " (" + o.airline + ")" : "") : "", o.pilot].filter(Boolean).join(" · ");
+
+  const tiles = terms.map((t) => `<div class="terminal"><h3>${esc(t.name)}</h3><div class="gts">${t.gates.map((g) =>
+    `<div class="gt ${g.occupied ? "busy" : ""}" title="${esc(g.label + (g.occupied ? ": " + who(g.occupied) : ": ledig"))}"><b>${esc(g.id)}</b><small>${g.occupied ? esc(g.occupied.flightNumber || g.occupied.pilot) : "Ledig"}</small></div>`).join("")}</div></div>`).join("");
+
+  const takenList = taken.length
+    ? `<ul class="gate-list">${taken.map(({ g, t }) => `<li><span><b>${esc(g.label)}</b>, ${esc(t.name)}: ${esc(who(g.occupied))}</span><button class="btn alt sm" data-action="gate-release" data-ap="${esc(a.id)}" data-gate="${esc(g.id)}" aria-label="Frigör ${esc(g.label)}">Frigör</button></li>`).join("")}</ul>`
+    : `<p style="margin-top:10px;color:var(--ink-2)">Inga gater är tilldelade just nu.</p>`;
+
+  let form = "";
+  if (assign) {
+    const map = new Map();
+    for (const c of [...(d.contacts || []), ...taken.map(({ g }) => ({ username: g.occupied.pilot, flightNumber: g.occupied.flightNumber }))]) map.set(c.username, c);
+    const pilots = [...map.values()].sort((x, y) => x.username.localeCompare(y.username));
+    if (!terms.some((t) => t.id === ui.gate.terminal)) ui.gate.terminal = terms[0].id;
+    const term = terms.find((t) => t.id === ui.gate.terminal);
+    const free = term.gates.filter((g) => !g.occupied);
+    if (!free.some((g) => g.id === ui.gate.gate)) ui.gate.gate = "";
+    if (ui.gate.pilot && !pilots.some((p) => p.username === ui.gate.pilot)) ui.gate.pilot = "";
+    const ready = ui.gate.pilot && ui.gate.terminal && ui.gate.gate;
+    form = `<form data-form="gate" data-ap="${esc(a.id)}">
+      <div class="gate-form">
+        <div class="field"><label class="f" for="gp">Pilot</label>
+          <select id="gp" data-bind="gate.pilot"><option value="">Välj pilot</option>${pilots.map((p) => `<option value="${esc(p.username)}" ${p.username === ui.gate.pilot ? "selected" : ""}>${esc(p.flightNumber ? p.flightNumber + " (" + p.username + ")" : p.username)}</option>`).join("")}</select></div>
+        <div class="field"><label class="f" for="gt">Terminal</label>
+          <select id="gt" data-bind="gate.terminal">${terms.map((t) => `<option value="${esc(t.id)}" ${t.id === ui.gate.terminal ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></div>
+        <div class="field"><label class="f" for="gg">Gate</label>
+          <select id="gg" data-bind="gate.gate">${free.length ? `<option value="">Välj gate</option>` + free.map((g) => `<option value="${esc(g.id)}" ${g.id === ui.gate.gate ? "selected" : ""}>${esc(g.label)}</option>`).join("") : `<option value="">Inga lediga gater</option>`}</select></div>
+      </div>
+      ${pilots.length ? "" : `<p class="lead" style="margin-bottom:10px">Det finns inga piloter att ge gate än. Piloter dyker upp här när de har en förfrågan, är på väg hit eller har skickat ACARS hit.</p>`}
+      <button class="btn go" type="submit" ${ready ? "" : "disabled"}>Tilldela gate</button></form>`;
+  }
+
+  return `<section class="block" id="gates"><header><h2>Gater</h2><p>${a.gatesFree} av ${a.gatesTotal} lediga${assign ? "" : " vid " + esc(a.name)}</p></header>
+    <div class="grid2">
+      <div class="panel"><h2>Terminaler</h2><div style="margin-top:10px">${tiles}</div></div>
+      <div class="panel">${assign
+        ? `<h2>Tilldela gate</h2><p class="lead">Välj pilot, terminal och en ledig gate. Piloten ser sin gate på startsidan. En pilot har en gate åt gången, så en tidigare gate frigörs.</p>${form}<h3 style="margin-top:20px">Tilldelade gater</h3>`
+        : `<h2>Tilldelade gater</h2>`}${takenList}</div>
+    </div></section>`;
+}
+
+function adminGates() {
+  const aps = S.data.airports;
+  return gatePanel(aps.find((x) => x.id === ui.adminAirport) || aps[0]);
 }
 
 /* --- Flygplatsstatus (ATC på plats och admin) --- */
@@ -765,6 +911,7 @@ function pilotView() {
   }
 
   return `${homePanel()}
+  ${pilotGate()}
   ${activeBlock}
   <section class="block"><div class="grid2">
     <div class="panel ${ready ? "" : "hl"}">
@@ -832,13 +979,15 @@ function atcView() {
 
   const pendingActions = (r) => `<input type="text" maxlength="140" placeholder="Meddelande till piloten (valfritt)" aria-label="Meddelande till piloten" data-bind="notes.${esc(r.id)}" value="${esc(ui.notes[r.id] || "")}">
     <div class="row"><button class="btn go sm" data-action="decide" data-act="approve" data-id="${esc(r.id)}">Godkänn</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Neka</button></div>`;
-  const approvedActions = (r) => `<div class="row"><button class="btn sm" data-action="decide" data-act="complete" data-id="${esc(r.id)}">Banan är fri</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Återkalla</button></div>`;
+  const approvedActions = (r) => `<div class="row"><button class="btn sm" data-action="decide" data-act="complete" data-id="${esc(r.id)}">Banan är fri</button><button class="btn stop sm" data-action="decide" data-act="deny" data-id="${esc(r.id)}">Återkalla</button></div>
+    ${r.type === "landing" ? `<div class="row"><button class="btn alt sm" data-action="gate-pick" data-to="${esc(r.pilot)}">Tilldela gate</button></div>` : ""}`;
 
   return `${homePanel()}
   ${duty}
   <section class="block"><header><h2>Banor vid ${esc(myAp.name)}</h2></header>
     <div class="aps">${airportCard(myAp, false)}</div></section>
   ${inboundSection()}
+  ${gatePanel(myAp, { assign: true })}
   ${statusPanel(myAp)}
   <section class="block"><header><h2>Väntande förfrågningar</h2><p>Äldst först.</p></header>
     ${pending.length ? `<div class="strips">${pending.map((r) => strip(r, { showPilot: true, actions: pendingActions(r) })).join("")}</div>` : empty("Inga väntande förfrågningar just nu.")}</section>
@@ -877,6 +1026,7 @@ function adminView() {
   <section class="block"><header><h2>Alla konton</h2></header>
     ${users.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Användare</th><th>Typ</th><th>Status</th><th>Uppgifter</th><th>Åtgärder</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("Det finns inga konton än.")}</section>
   ${adminStatus()}
+  ${adminGates()}
   ${inboundSection({ admin: true })}
   <section class="block"><header><h2>Flygplatser just nu</h2></header>${airportGrid()}</section>
   <section class="block"><header><h2>Senaste förfrågningar</h2>
@@ -895,7 +1045,8 @@ document.addEventListener("change", (e) => {
   if (!b) return;
   setPath(ui, b, t.value);
   if (b === "pilot.airport") { ui.pilot.runway = ""; render(); }
-  else if (b === "atcAirport" || b === "reg.role" || b === "adminAirport" || b === "activityFilter") render();
+  else if (b === "gate.terminal") { ui.gate.gate = ""; render(); }
+  else if (b === "atcAirport" || b === "reg.role" || b === "adminAirport" || b === "activityFilter" || b === "gate.pilot" || b === "gate.gate") render();
 });
 
 async function call(path, body, okMsg) {
@@ -937,6 +1088,11 @@ document.addEventListener("submit", async (e) => {
       ui.acars.text = "";
       toast("ACARS skickat.", "ok");
       await refresh(true);
+    } else if (f === "gate") {
+      await api("airports/" + encodeURIComponent(e.target.dataset.ap) + "/gate-assign", { method: "POST", body: { pilot: ui.gate.pilot, terminal: ui.gate.terminal, gate: ui.gate.gate } });
+      ui.gate.pilot = ""; ui.gate.gate = "";
+      toast("Gaten är tilldelad.", "ok");
+      await refresh(true);
     } else if (f === "announce") {
       await api("announcements", { method: "POST", body: { audience: ui.ann.audience, text: ui.ann.text } });
       ui.ann.text = "";
@@ -966,6 +1122,7 @@ document.addEventListener("click", async (e) => {
   const a = el.dataset.action;
   try {
     if (a === "tab") { ui.tab = el.dataset.v; render(); }
+    else if (a === "theme-toggle") { setTheme(curTheme() === "dark" ? "light" : "dark"); render(); }
     else if (a === "logout") {
       try { await api("logout", { method: "POST" }); } catch (x) {}
       forceLogout();
@@ -998,6 +1155,18 @@ document.addEventListener("click", async (e) => {
     else if (a === "ann-del") {
       el.disabled = true;
       await call("announcements/" + encodeURIComponent(el.dataset.id) + "/delete", {}, "Informationen är borttagen.");
+    }
+    else if (a === "gate-release") {
+      el.disabled = true;
+      await call("airports/" + encodeURIComponent(el.dataset.ap) + "/gate-release", { gate: el.dataset.gate }, "Gaten är frigjord.");
+    }
+    else if (a === "gate-leave") {
+      el.disabled = true;
+      await call("gate/leave", {}, "Du har lämnat gaten.");
+    }
+    else if (a === "gate-pick") {
+      ui.gate.pilot = el.dataset.to; render();
+      const n = $("#gates"); if (n && n.scrollIntoView) n.scrollIntoView({ block: "start" });
     }
     else if (a === "enroute-off") {
       el.disabled = true;

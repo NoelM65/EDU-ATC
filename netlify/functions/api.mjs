@@ -9,13 +9,21 @@ const scrypt = promisify(crypto.scrypt);
 /*  Flygplatser (servern är sanningskälla för banor)                   */
 /* ------------------------------------------------------------------ */
 export const AIRPORTS = [
-  { id: "katrineholm-kattport", name: "Katrineholm Kattport International Airport", runways: ["1A", "2A", "3A", "4A", "1B", "2B", "3B", "4B"] },
-  { id: "malmo", name: "Malmö International Airport", runways: ["1"] },
-  { id: "uk", name: "UK International Airport", runways: ["1"] },
-  { id: "hallonbergen", name: "Hallonbergen Airport", runways: ["1"] },
-  { id: "katrineholm-halvon", name: "Katrineholm Halvön Airport", runways: ["1"] },
-  { id: "turkmenistan", name: "Turkmenistan Internationella Flygfält", runways: ["1"] },
-  { id: "borgvik", name: "Borgvik Airport", runways: ["1"] },
+  {
+    id: "katrineholm-kattport",
+    name: "Katrineholm Kattport International Airport",
+    runways: ["1A", "2A", "3A", "4A", "1B", "2B", "3B", "4B"],
+    terminals: [
+      { id: "T1", name: "Terminal 1", gates: ["1a", "2a", "3a", "4a", "5a", "6a"] },
+      { id: "T2", name: "Terminal 2", gates: ["7b", "8b", "9b", "10b", "11b", "12b", "13b", "14b", "15b", "16b"] },
+    ],
+  },
+  { id: "malmo", name: "Malmö International Airport", runways: ["1"], terminals: [{ id: "T1", name: "Terminal 1", gates: ["1"] }] },
+  { id: "uk", name: "UK International Airport", runways: ["1"], terminals: [{ id: "T1", name: "Terminal 1", gates: ["2"] }] },
+  { id: "hallonbergen", name: "Hallonbergen Airport", runways: ["1"], terminals: [{ id: "T1", name: "Terminal 1", gates: ["2", "3"] }] },
+  { id: "katrineholm-halvon", name: "Katrineholm Halvön Airport", runways: ["1"], terminals: [{ id: "T1", name: "Terminal 1", gates: ["1"] }] },
+  { id: "turkmenistan", name: "Turkmenistan Internationella Flygfält", runways: ["1"], terminals: [{ id: "T1", name: "Terminal 1", gates: ["1"] }] },
+  { id: "borgvik", name: "Borgvik Airport", runways: ["1"], terminals: [{ id: "T1", name: "Terminal 1", gates: ["1"] }] },
 ];
 
 /* Adminkonto. Kan bytas utan kodändring via miljövariablerna
@@ -36,6 +44,7 @@ const EVENT_TTL = 48 * 3600 * 1000; // aktivitetsloggen sparas i 48 h
 const EVENT_KEEP = 300; // och högst 300 händelser
 const SEEN_ONLINE = 90 * 1000; // räknas som online 90 s efter senaste aktivitet
 const ANN_TTL = 7 * 24 * 3600 * 1000; // information på startsidan försvinner efter 7 dygn
+const GATE_TTL = 6 * 3600 * 1000; // en tilldelad gate släpps automatiskt efter 6 h
 const TYPE_SV = { landing: "landning", takeoff: "start" };
 const short = (s, n = 80) => (String(s).length > n ? String(s).slice(0, n - 1) + "…" : String(s));
 
@@ -313,9 +322,52 @@ async function heartbeat(db, me) {
   }
 }
 
-function buildAirports(reqs, presence, statuses) {
+/* ---------------- Gater (tilldelas av ATC) ---------------- */
+async function loadGates(db) {
+  const now = Date.now();
+  const { blobs } = await db.gates.list();
+  const rows = [];
+  for (const b of blobs) {
+    const g = await db.gates.get(b.key, { type: "json" });
+    if (!g) continue;
+    if (now - g.at > GATE_TTL) {
+      await db.gates.delete(b.key);
+      continue;
+    }
+    rows.push(g);
+  }
+  return rows;
+}
+
+// Släpper en pilots gate, antingen vid en viss flygplats eller överallt
+async function releasePilotGates(db, username, airportId = null) {
+  const rows = await loadGates(db);
+  for (const g of rows) if (g.pilot === username && (!airportId || g.airport === airportId)) await db.gates.delete(`${g.airport}/${g.gate}`);
+}
+
+// Piloter som en flygplats kan tilldela gate: de som har en förfrågan där, är på väg dit eller har skickat ACARS dit
+function contactsFor(airportId, reqs, msgs, enroute) {
+  const map = new Map();
+  for (const r of reqs) if (r.airport === airportId) map.set(r.pilot, { username: r.pilot, flightNumber: r.flightNumber });
+  for (const m of msgs) if (m.airport === airportId && m.fromRole === "pilot") map.set(m.from, { username: m.from, flightNumber: m.flightNumber });
+  for (const f of enroute) if (f.airport === airportId) map.set(f.username, { username: f.username, flightNumber: f.flightNumber });
+  return map;
+}
+
+function buildAirports(reqs, presence, statuses, gates = []) {
   return AIRPORTS.map((a) => {
     const s = statuses[a.id] || emptyStatus();
+    const mine = gates.filter((g) => g.airport === a.id);
+    const terminals = a.terminals.map((t) => ({
+      id: t.id,
+      name: t.name,
+      gates: t.gates.map((g) => {
+        const o = mine.find((x) => x.gate === g);
+        return { id: g, label: "Gate " + g, occupied: o ? { pilot: o.pilot, flightNumber: o.flightNumber, airline: o.airline, since: o.at } : null };
+      }),
+    }));
+    const gatesTotal = terminals.reduce((n, t) => n + t.gates.length, 0);
+    const gatesFree = terminals.reduce((n, t) => n + t.gates.filter((g) => !g.occupied).length, 0);
     const runwayStatus = Object.fromEntries(a.runways.map((rw) => [rw, null]));
     let pending = 0;
     for (const r of reqs) {
@@ -339,6 +391,9 @@ function buildAirports(reqs, presence, statuses) {
       runwayStatus,
       pending,
       atc: presence.filter((p) => p.airport === a.id).map((p) => p.username),
+      terminals,
+      gatesTotal,
+      gatesFree,
       closed: !!s.closed,
       closedReason: s.reason || "",
       closedBy: s.closedBy || null,
@@ -538,7 +593,7 @@ async function deleteAnnouncement(me, db, id) {
 async function state(me, db) {
   await heartbeat(db, me);
   await touchSeen(db, me);
-  const [reqs, presence, msgs, statuses, enroute, anns] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db), loadEnroute(db), loadAnnouncements(db)]);
+  const [reqs, presence, msgs, statuses, enroute, anns, gates] = await Promise.all([loadRequests(db), loadPresence(db), loadMessages(db), loadStatuses(db), loadEnroute(db), loadAnnouncements(db), loadGates(db)]);
   let visible = [];
   if (me.role === "pilot") visible = reqs.filter((r) => r.pilot === me.username).slice(0, 25);
   else if (me.role === "atc" && me.airport) visible = reqs.filter((r) => r.airport === me.airport).slice(0, 80);
@@ -547,11 +602,14 @@ async function state(me, db) {
   // Piloter som ATC kan skriva till: de som har förfrågningar eller meddelanden vid flygplatsen
   let contacts = [];
   if (me.role === "atc" && me.airport) {
-    const map = new Map();
-    for (const r of reqs) if (r.airport === me.airport) map.set(r.pilot, { username: r.pilot, flightNumber: r.flightNumber });
-    for (const m of msgs) if (m.airport === me.airport && m.fromRole === "pilot") map.set(m.from, { username: m.from, flightNumber: m.flightNumber });
-    for (const f of enroute) if (f.airport === me.airport) map.set(f.username, { username: f.username, flightNumber: f.flightNumber });
-    contacts = [...map.values()].sort((a, b) => a.username.localeCompare(b.username));
+    contacts = [...contactsFor(me.airport, reqs, msgs, enroute).values()].sort((a, b) => a.username.localeCompare(b.username));
+  }
+
+  // Pilotens egen gate
+  let myGate = null;
+  if (me.role === "pilot") {
+    const g = gates.find((x) => x.pilot === me.username);
+    if (g) myGate = { airport: g.airport, terminal: g.terminal, terminalName: g.terminalName, gate: g.gate, since: g.at };
   }
 
   // Ankommande flyg: ATC ser flyg på väg till sin flygplats, admin ser alla, piloten ser sitt eget
@@ -567,12 +625,13 @@ async function state(me, db) {
 
   return json({
     me: publicUser(me),
-    airports: buildAirports(reqs, presence, statuses),
+    airports: buildAirports(reqs, presence, statuses, gates),
     requests: visible,
     messages: visibleMessages(me, msgs, reqs, enroute).slice(0, 60),
     contacts,
     inbound,
     myFlight,
+    myGate,
     announcements: visibleAnnouncements(me, anns, me.role === "pilot" ? pilotAirports(me, { msgs, reqs, enroute, destination: true }) : new Set()).slice(0, 30),
     now: Date.now(),
   });
@@ -693,6 +752,8 @@ async function decide(req, me, db, id) {
       const f = await db.enroute.get(r.pilot.toLowerCase(), { type: "json" });
       if (f && f.airport === r.airport) await db.enroute.delete(r.pilot.toLowerCase());
     }
+    // En genomförd start betyder att piloten har lämnat gaten
+    if (r.type === "takeoff") await releasePilotGates(db, r.pilot, r.airport);
   } else {
     throw bad("Okänd åtgärd.");
   }
@@ -740,6 +801,7 @@ async function adminUserAction(req, db, name, action) {
     await db.presence.delete(key);
     await db.enroute.delete(key);
     await db.seen.delete(key);
+    await releasePilotGates(db, u.username);
     return json({ ok: true });
   } else if (action === "password") {
     const { password } = await readBody(req);
@@ -753,8 +815,65 @@ async function adminUserAction(req, db, name, action) {
   if (u.status !== "approved") {
     await db.presence.delete(key);
     await db.enroute.delete(key);
+    await releasePilotGates(db, u.username);
   }
   return json({ user: publicUser(u) });
+}
+
+/* ---------------- Pilot lämnar sin gate ---------------- */
+async function leaveGate(me, db) {
+  if (me.role !== "pilot") throw new HttpError(403, "Endast piloter kan lämna sin egen gate.");
+  const mine = (await loadGates(db)).filter((g) => g.pilot === me.username);
+  for (const g of mine) {
+    await db.gates.delete(`${g.airport}/${g.gate}`);
+    await logEvent(db, me, `lämnade Gate ${g.gate} vid ${(findAirport(g.airport) || {}).name || g.airport}`, { airport: g.airport });
+  }
+  return json({ ok: true });
+}
+
+/* ---------------- Gater: tilldela och frigör (ATC på plats eller admin) ---------------- */
+async function gateAction(req, me, db, id, action) {
+  const ap = findAirport(id);
+  if (!ap) throw new HttpError(404, "Flygplatsen finns inte.");
+  const allowed = me.role === "admin" || (me.role === "atc" && me.airport === id);
+  if (!allowed) throw new HttpError(403, "Du är inte på tjänst vid den här flygplatsen.");
+  const body = await readBody(req);
+  const rows = await loadGates(db);
+
+  if (action === "gate-release") {
+    const g = rows.find((r) => r.airport === id && r.gate === String(body.gate));
+    if (!g) throw new HttpError(404, "Gaten är inte tilldelad.");
+    await db.gates.delete(`${id}/${g.gate}`);
+    await logEvent(db, me, `frigjorde Gate ${g.gate} vid ${ap.name} (${g.flightNumber || g.pilot})`, { airport: id });
+    return json({ ok: true });
+  }
+  if (action !== "gate-assign") throw bad("Okänd åtgärd.");
+
+  const terminal = ap.terminals.find((t) => t.id === body.terminal);
+  if (!terminal) throw bad("Välj en terminal.");
+  const gate = String(body.gate || "");
+  if (!terminal.gates.includes(gate)) throw bad("Gaten finns inte i den terminalen.");
+
+  const key = String(body.pilot || "").toLowerCase();
+  if (!/^[a-z0-9_]{3,16}$/.test(key)) throw bad("Välj vilken pilot som ska få gaten.");
+  const pilot = await db.users.get(key, { type: "json" });
+  if (!pilot || pilot.role !== "pilot" || pilot.status !== "approved") throw bad("Piloten finns inte.");
+
+  const taken = rows.find((r) => r.airport === id && r.gate === gate);
+  if (taken && taken.pilot === pilot.username) return json({ gate: taken }); // redan tilldelad, inget att göra
+  if (taken) throw new HttpError(409, `Gate ${gate} är upptagen av ${taken.flightNumber || taken.pilot}. Välj en annan gate.`);
+
+  const [reqs, msgs, enroute] = await Promise.all([loadRequests(db), loadMessages(db), loadEnroute(db)]);
+  if (!contactsFor(id, reqs, msgs, enroute).has(pilot.username))
+    throw bad("Piloten har ingen koppling till flygplatsen än. Piloter kan få gate när de har en förfrågan, är på väg hit eller har skickat ACARS hit.");
+
+  // En pilot har en gate åt gången: en tidigare gate släpps
+  for (const prev of rows) if (prev.pilot === pilot.username) await db.gates.delete(`${prev.airport}/${prev.gate}`);
+
+  const rec = { airport: id, terminal: terminal.id, terminalName: terminal.name, gate, pilot: pilot.username, flightNumber: pilot.flightNumber || "", airline: pilot.airline || "", by: me.username, at: Date.now() };
+  await db.gates.setJSON(`${id}/${gate}`, rec);
+  await logEvent(db, me, `tilldelade ${pilot.flightNumber || pilot.username} Gate ${gate}, ${terminal.name} vid ${ap.name}`, { airport: id });
+  return json({ gate: rec }, 201);
 }
 
 /* ---------------- Flygplatsstatus (ATC på plats eller admin) ---------------- */
@@ -918,9 +1037,10 @@ async function route(req, db) {
   if (m === "POST" && a === "requests" && b && c === "cancel") return cancel(me, db, b);
   if (m === "POST" && a === "messages" && !b) return sendMessage(req, me, db);
   if (m === "POST" && a === "enroute" && !b) return setEnroute(req, me, db);
+  if (m === "POST" && a === "gate" && b === "leave" && !c) return leaveGate(me, db);
   if (m === "POST" && a === "announcements" && !b) return createAnnouncement(req, me, db);
   if (m === "POST" && a === "announcements" && b && c === "delete") return deleteAnnouncement(me, db, b);
-  if (m === "POST" && a === "airports" && b && c && !d) return airportAction(req, me, db, b, c);
+  if (m === "POST" && a === "airports" && b && c && !d) return c.startsWith("gate-") ? gateAction(req, me, db, b, c) : airportAction(req, me, db, b, c);
 
   if (a === "admin") {
     if (me.role !== "admin") throw new HttpError(403, "Endast admin.");
@@ -947,6 +1067,7 @@ export function createHandler(getStoreFn) {
         messages: open("messages"),
         enroute: open("enroute"),
         activity: open("activity"),
+        gates: open("gates"),
         seen: open("seen"),
         announcements: open("announcements"),
         airportstatus: open("airportstatus"),

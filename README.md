@@ -48,6 +48,8 @@ Lösenordet ligger som standardvärde i `api.mjs`. Vill du inte ha det i koden, 
 - **Flygplatsstatus:** ATC på plats (och admin för alla flygplatser) kan stänga flygplatsen, stänga enskilda banor och lägga ut information som "Lampor ej tillgängliga" eller "Ground crew ej tillgängligt", med valfri orsak. Piloter kan inte begära tillstånd på en stängd flygplats eller bana, och ATC kan inte godkänna förfrågningar där. Stängningar och information syns på flygplatsens kort för alla. Förfrågningar som redan finns när något stängs ligger kvar, så ATC kan neka dem. Banor som redan har ett pågående tillstånd påverkas inte.
 - **Startsida med information:** alla ser *Välkommen* överst, och under den information som admin eller ATC har lagt ut. Admin väljer mottagare i en meny (alla, alla piloter eller alla ATC) och skriver informationen. ATC som är på tjänst väljer mellan piloter vid sin flygplats och alla piloter. Piloter räknas höra till en flygplats om de har en förfrågan där, är på väg dit eller har den som sparad destination. Informationen är högst 300 tecken, visas i 7 dygn och kan tas bort av den som skrev den, och av admin. Nya meddelanden visas även som en notis.
 - **Se Aktivitet (admin):** knappen i toppraden öppnar en översikt. *Just nu* visar alla piloter och ATC med om de är online (aktiva de senaste 90 sekunderna) och vad de gör: pilotens förfrågan och flygning på väg, eller ATC:s flygplats. *Senaste händelser* visar inloggningar, förfrågningar och beslut, ACARS, stängningar, information och att gå på eller av tjänst, 48 timmar bakåt och högst 150 rader åt gången. Alternativen i menyn filtrerar på alla, bara piloter eller bara ATC.
+- **Gater och terminaler:** ATC på plats (och admin för alla flygplatser) väljer pilot, terminal och en ledig gate under *Gater*, och piloten ser sin gate och terminal på startsidan (med en notis). Knappen *Tilldela gate* finns också vid ankommande flyg och godkända landningar. ATC kan bara ge gate till piloter som har en förfrågan vid flygplatsen, är på väg dit eller har skickat ACARS dit. En pilot har en gate åt gången, så en tidigare gate släpps. Gaten frigörs när ATC trycker *Frigör*, när piloten trycker *Jag har lämnat gaten*, när en start är genomförd, efter 6 timmar eller om kontot spärras eller tas bort. Flygplatskorten visar antal lediga gater.
+- **Ljust och mörkt läge:** knappen i toppraden växlar tema. Valet sparas i webbläsaren, och första gången följer sidan enhetens inställning.
 - **Admin:** kan ta bort enskilda förfrågningar, ta bort alla avslutade eller alla förfrågningar, sätta en bana som fri och ta bort ACARS-meddelanden en och en eller alla på en gång. Admin ser hela ACARS-loggen men kan inte skicka meddelanden.
 - **Städning:** väntande förfrågningar går ut efter 30 minuter, godkända tillstånd avslutas automatiskt efter 60 minuter och historik rensas efter 2 dygn. ACARS-meddelanden rensas efter 24 timmar. ATC räknas som på plats så länge sidan är öppen.
 
@@ -63,7 +65,9 @@ Lösenordet ligger som standardvärde i `api.mjs`. Vill du inte ha det i koden, 
 | Turkmenistan Internationella Flygfält | 1 |
 | Borgvik Airport | 1 |
 
-Fler flygplatser eller banor läggs till i listan `AIRPORTS` överst i `netlify/functions/api.mjs`.
+Gater och terminaler finns i samma lista (`terminals`).
+
+Fler flygplatser, banor eller gater läggs till i listan `AIRPORTS` överst i `netlify/functions/api.mjs`.
 
 ## Bra att veta
 
